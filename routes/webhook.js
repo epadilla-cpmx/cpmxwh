@@ -1,7 +1,7 @@
 const express = require("express");
 const router = express.Router();
 
-router.post("/webhook/:event?", async (req, res) => {
+async function handler(req, res) {
 
   try {
 
@@ -22,6 +22,10 @@ router.post("/webhook/:event?", async (req, res) => {
 
   }
 
-});
+}
+
+router.post("/webhook", handler);
+
+router.post("/webhook/messages-upsert", handler);
 
 module.exports = router;
