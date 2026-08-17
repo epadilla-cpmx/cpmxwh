@@ -6,7 +6,7 @@ const auth = new google.auth.GoogleAuth({
     private_key: process.env.GOOGLE_PRIVATE_KEY.replace(/\\n/g, "\n"),
   },
   scopes: [
-    "https://www.googleapis.com/auth/spreadsheets.readonly"
+    "https://www.googleapis.com/auth/spreadsheets"
   ],
 });
 
@@ -30,6 +30,27 @@ async function getVacanteData() {
   };
 }
 
+async function saveResponse(responseText) {
+
+  const sheets = google.sheets({
+    version: "v4",
+    auth,
+  });
+
+  await sheets.spreadsheets.values.update({
+    spreadsheetId: process.env.JD_SHEETS_ID,
+    range: "Vacantes!AW2",
+    valueInputOption: "RAW",
+    requestBody: {
+      values: [
+        [responseText]
+      ]
+    }
+  });
+
+}
+
 module.exports = {
-  getVacanteData
+  getVacanteData,
+  saveResponse
 };
