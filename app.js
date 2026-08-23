@@ -4,6 +4,7 @@ const express = require("express");
 
 const testRoute = require("./routes/test");
 const webhookRoute = require("./routes/webhook");
+const conversationRoute = require("./routes/conversation");
 
 const app = express();
 
@@ -23,6 +24,7 @@ app.get("/health", (req, res) => {
 
 app.use("/", testRoute);
 app.use("/", webhookRoute);
+app.use("/", conversationRoute);
 
 const PORT = process.env.PORT || 8080;
 
