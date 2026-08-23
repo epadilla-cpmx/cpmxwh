@@ -37,7 +37,7 @@ router.post("/conversation/start", async (req, res) => {
 
     console.log("Reclutador:", data.recruiterInstance);
     console.log("Guion:", data.scriptId);
-    console.log("Vacante:", data.vacancyName);
+    console.log("Vacante:", data.vacancy.name);
     console.log("Candidatos:", data.candidates.length);
 
     // Por ahora solamente confirmamos que recibimos correctamente la información.

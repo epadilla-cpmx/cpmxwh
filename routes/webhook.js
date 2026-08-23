@@ -55,11 +55,7 @@ async function handler(req, res) {
     }
 
     // 7. Guardar respuesta en Google Sheets
-    await saveResponse(text);
-
-    console.log("Respuesta guardada en Google Sheets.");
-
-    res.sendStatus(200);
+    
 
   } catch (error) {
 
