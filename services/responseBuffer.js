@@ -1,55 +1,87 @@
-const buffers = new Map();
+const { google } = require("googleapis");
+
+const { normalizePhone } = require("./phone");
 
 const RESPONSE_BUFFER_MS = Number(
   process.env.RESPONSE_BUFFER_MS || 11500
 );
 
-function addMessage(conversationId, messageId, text, onComplete) {
-  let buffer = buffers.get(conversationId);
+const auth = new google.auth.GoogleAuth({
+  credentials: {
+    client_email: process.env.GOOGLE_CLIENT_EMAIL,
+    private_key: process.env.GOOGLE_PRIVATE_KEY.replace(/\\n/g, "\n")
+  },
+  scopes: ["https://www.googleapis.com/auth/spreadsheets"]
+});
 
-  if (!buffer) {
-    buffer = {
-      messages: [],
-      messageIds: new Set(),
-      timer: null,
-      processing: false
-    };
-    buffers.set(conversationId, buffer);
-  }
+const TARGET_SHEET_ID = process.env.TARGET_SHEET_ID;
 
-  if (messageId && buffer.messageIds.has(messageId)) {
-    console.log("Mensaje duplicado ignorado:", messageId);
-    return;
-  }
-
-  if (messageId) buffer.messageIds.add(messageId);
-  buffer.messages.push(text);
-
-  if (buffer.timer) clearTimeout(buffer.timer);
-
-  buffer.timer = setTimeout(async () => {
-    if (buffer.processing) return;
-    buffer.processing = true;
-
-    try {
-      const combinedText = buffer.messages.join("\n");
-      buffers.delete(conversationId);
-      await onComplete(combinedText);
-    } catch (error) {
-      buffers.delete(conversationId);
-      console.error("Error procesando buffer:", error);
-    }
-  }, RESPONSE_BUFFER_MS);
+function getSheetsClient() {
+  return google.sheets({ version: "v4", auth });
 }
 
-function clearBuffer(conversationId) {
-  const buffer = buffers.get(conversationId);
-  if (buffer?.timer) clearTimeout(buffer.timer);
-  buffers.delete(conversationId);
+function nowIso() {
+  return new Date().toISOString();
+}
+
+async function updateBufferState(conversation, values) {
+  const sheets = getSheetsClient();
+  await sheets.spreadsheets.values.update({
+    spreadsheetId: TARGET_SHEET_ID,
+    range: `Motor!N${conversation.motorRow}:Q${conversation.motorRow}`,
+    valueInputOption: "RAW",
+    requestBody: {
+      values: [[
+        values.pendingResponse ?? conversation.pendingResponse ?? "",
+        values.lastMessageAt ?? conversation.lastMessageAt ?? "",
+        values.processing ?? conversation.processing ?? false,
+        values.lastMessageId ?? conversation.lastMessageId ?? ""
+      ]]
+    }
+  });
+}
+
+async function appendMessage(conversation, messageId, text) {
+  if (!text) return { added: false, reason: "empty_text" };
+
+  if (messageId && messageId === conversation.lastMessageId) {
+    console.log("Mensaje duplicado ignorado:", messageId);
+    return { added: false, reason: "duplicate" };
+  }
+
+  const pendingResponse = conversation.pendingResponse
+    ? `${conversation.pendingResponse}\n${text}`
+    : text;
+
+  const lastMessageAt = nowIso();
+
+  await updateBufferState(conversation, {
+    pendingResponse,
+    lastMessageAt,
+    processing: false,
+    lastMessageId: messageId || conversation.lastMessageId
+  });
+
+  console.log(
+    `Respuesta acumulada para ${conversation.conversationId}. ` +
+    `Ventana: ${RESPONSE_BUFFER_MS} ms.`
+  );
+
+  return {
+    added: true,
+    pendingResponse,
+    lastMessageAt
+  };
+}
+
+function hasBufferExpired(lastMessageAt) {
+  if (!lastMessageAt) return false;
+  return Date.now() - new Date(lastMessageAt).getTime() >= RESPONSE_BUFFER_MS;
 }
 
 module.exports = {
-  addMessage,
-  clearBuffer,
+  appendMessage,
+  updateBufferState,
+  hasBufferExpired,
   RESPONSE_BUFFER_MS
 };
