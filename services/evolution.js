@@ -12,6 +12,7 @@ async function sendMessage(instance, number, text, options = {}) {
 
   const normalizedNumber = normalizePhone(number);
   const body = { number: normalizedNumber, text };
+
   if (options.delayMs) body.delay = options.delayMs;
   if (options.presence) body.presence = options.presence;
 
