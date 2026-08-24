@@ -1,147 +1,126 @@
 const express = require("express");
 const router = express.Router();
 
-const {
-  findConversation
-} = require("../services/conversationFinder");
+const { findConversation } = require("../services/conversationFinder");
+const { getConsentResult } = require("../services/consent");
+const { updateConversation } = require("../services/conversationUpdater");
+const { sendCurrentStep, advanceConversation } = require("../services/conversationEngine");
+const { markMessageAsRead } = require("../services/evolution");
+const { addMessage } = require("../services/responseBuffer");
 
-const {
-  getConsentResult
-} = require("../services/consent");
+const processedMessages = new Map();
+const conversationLocks = new Set();
+const PROCESSED_MESSAGE_TTL_MS = 10 * 60 * 1000;
 
-const {
-  updateConversation
-} = require("../services/conversationUpdater");
+function isProcessed(messageId) {
+  if (!messageId) return false;
 
-const {
-  sendCurrentStep,
-  advanceConversation
-} = require("../services/conversationEngine");
+  const timestamp = processedMessages.get(messageId);
 
-const {
-  markMessageAsRead
-} = require("../services/evolution");
+  if (!timestamp) return false;
 
+  if (Date.now() - timestamp > PROCESSED_MESSAGE_TTL_MS) {
+    processedMessages.delete(messageId);
+    return false;
+  }
 
-async function handler(req, res) {
+  return true;
+}
+
+function markProcessed(messageId) {
+  if (!messageId) return;
+  processedMessages.set(messageId, Date.now());
+}
+
+async function processBufferedAnswer(data, candidatePhone, conversationId, answer) {
+  if (conversationLocks.has(conversationId)) {
+    console.log("Conversación ya está siendo procesada. Se omite ejecución duplicada:", conversationId);
+    return;
+  }
+
+  conversationLocks.add(conversationId);
 
   try {
+    const conversation = await findConversation(
+      data.instance,
+      candidatePhone
+    );
 
+    if (!conversation) {
+      console.log("No se encontró conversación al procesar buffer.");
+      return;
+    }
+
+    if (conversation.status !== "waiting_answer") {
+      console.log("La conversación ya no espera respuesta:", conversation.status);
+      return;
+    }
+
+    console.log("Respuesta consolidada:", answer);
+    console.log("Procesando respuesta de la pregunta:", conversation.currentStep);
+
+    await advanceConversation(
+      conversation,
+      answer
+    );
+  } finally {
+    conversationLocks.delete(conversationId);
+  }
+}
+
+async function handler(req, res) {
+  try {
     const data = req.body;
 
     console.log("Webhook recibido");
     console.log("Evento:", data.event);
     console.log("Instancia:", data.instance);
 
-
-    // --------------------------------------------------
-    // VALIDAR EVENTO
-    // --------------------------------------------------
-
     if (data.event !== "messages.upsert") {
-
       console.log("Evento ignorado");
-
       return res.sendStatus(200);
-
     }
-
-
-    // --------------------------------------------------
-    // INFORMACIÓN DEL MENSAJE
-    // --------------------------------------------------
 
     const key = data.data?.key;
 
-
-    // Ignorar mensajes enviados por nosotros
-
     if (key?.fromMe === true) {
-
-      console.log(
-        "Mensaje enviado por nosotros. Ignorado."
-      );
-
+      console.log("Mensaje enviado por nosotros. Ignorado.");
       return res.sendStatus(200);
-
     }
 
-
-    const remoteJid =
-      key?.remoteJid;
-
-    const messageId =
-      key?.id;
-
-
-    // --------------------------------------------------
-    // VALIDAR NÚMERO
-    // --------------------------------------------------
+    const remoteJid = key?.remoteJid;
+    const messageId = key?.id;
 
     if (!remoteJid) {
-
-      console.log(
-        "No se encontró remoteJid."
-      );
-
+      console.log("No se encontró remoteJid.");
       return res.sendStatus(200);
-
     }
 
-
-    // Ignorar grupos
-
-    if (
-      remoteJid.endsWith("@g.us")
-    ) {
-
-      console.log(
-        "Mensaje de grupo. Ignorado."
-      );
-
+    if (remoteJid.endsWith("@g.us")) {
+      console.log("Mensaje de grupo. Ignorado.");
       return res.sendStatus(200);
-
     }
 
+    if (isProcessed(messageId)) {
+      console.log("Mensaje duplicado ignorado:", messageId);
+      return res.sendStatus(200);
+    }
 
-    // --------------------------------------------------
-    // EXTRAER TEXTO
-    // --------------------------------------------------
+    markProcessed(messageId);
 
-    const message =
-      data.data?.message;
-
+    const message = data.data?.message;
     const text =
       message?.conversation ||
       message?.extendedTextMessage?.text ||
       "";
 
-
-    console.log(
-      "Número:",
-      remoteJid
-    );
-
-    console.log(
-      "Mensaje:",
-      text
-    );
-
+    console.log("Número:", remoteJid);
+    console.log("Mensaje:", text);
 
     if (!text) {
-
-      console.log(
-        "Mensaje sin texto. Ignorado."
-      );
-
+      console.log("Mensaje sin texto. Ignorado.");
       return res.sendStatus(200);
-
     }
-
-
-    // --------------------------------------------------
-    // MARCAR COMO LEÍDO
-    // --------------------------------------------------
 
     await markMessageAsRead(
       data.instance,
@@ -149,240 +128,100 @@ async function handler(req, res) {
       messageId
     );
 
-
-    // --------------------------------------------------
-    // NORMALIZAR TELÉFONO
-    // --------------------------------------------------
-
-    const candidatePhone =
-      remoteJid.replace(
-        "@s.whatsapp.net",
-        ""
-      );
-
+    const candidatePhone = remoteJid.replace(
+      "@s.whatsapp.net",
+      ""
+    );
 
     console.log(
       "Buscando conversación para:",
       candidatePhone
     );
 
-
-    // --------------------------------------------------
-    // BUSCAR CONVERSACIÓN
-    // --------------------------------------------------
-
-    const conversation =
-      await findConversation(
-        data.instance,
-        candidatePhone
-      );
-
-
-    if (!conversation) {
-
-      console.log(
-        "No se encontró una conversación activa."
-      );
-
-      return res.sendStatus(200);
-
-    }
-
-
-    console.log(
-      "Conversación encontrada:",
-      conversation
+    const conversation = await findConversation(
+      data.instance,
+      candidatePhone
     );
 
-
-    // --------------------------------------------------
-    // CONSENTIMIENTO
-    // --------------------------------------------------
-
-    if (
-      conversation.status ===
-      "waiting_start"
-    ) {
-
-      console.log(
-        "La conversación está esperando consentimiento."
-      );
-
-
-      const consent =
-        getConsentResult(text);
-
-
-      console.log(
-        "Resultado del consentimiento:",
-        consent
-      );
-
-
-      // ----------------------------------------------
-      // ACEPTADO
-      // ----------------------------------------------
-
-      if (
-        consent === "accepted"
-      ) {
-
-        await updateConversation(
-
-          conversation.conversationId,
-
-          {
-            currentStep: 0,
-            status: "waiting_answer"
-          }
-
-        );
-
-
-        const updatedConversation = {
-
-          ...conversation,
-
-          currentStep: 0,
-
-          status:
-            "waiting_answer"
-
-        };
-
-
-        console.log(
-          "Consentimiento aceptado."
-        );
-
-
-        await sendCurrentStep(
-          updatedConversation
-        );
-
-
-        return res.sendStatus(200);
-
-      }
-
-
-      // ----------------------------------------------
-      // RECHAZADO
-      // ----------------------------------------------
-
-      if (
-        consent === "rejected"
-      ) {
-
-        await updateConversation(
-
-          conversation.conversationId,
-
-          {
-            status:
-              "cancelled"
-          }
-
-        );
-
-
-        console.log(
-          "Entrevista cancelada por el candidato."
-        );
-
-
-        return res.sendStatus(200);
-
-      }
-
-
-      // ----------------------------------------------
-      // RESPUESTA AMBIGUA
-      // ----------------------------------------------
-
-      console.log(
-        "Respuesta ambigua. No se modifica la conversación."
-      );
-
-
+    if (!conversation) {
+      console.log("No se encontró una conversación activa.");
       return res.sendStatus(200);
-
     }
 
+    console.log("Conversación encontrada:", conversation);
 
-    // --------------------------------------------------
-    // RESPUESTA A PREGUNTA
-    // --------------------------------------------------
+    if (conversation.status === "waiting_start") {
+      console.log("La conversación está esperando consentimiento.");
 
-    if (
-      conversation.status ===
-      "waiting_answer"
-    ) {
+      const consent = getConsentResult(text);
+      console.log("Resultado del consentimiento:", consent);
 
+      if (consent === "accepted") {
+        await updateConversation(
+          conversation.conversationId,
+          { currentStep: 0, status: "waiting_answer" }
+        );
+
+        await sendCurrentStep({
+          ...conversation,
+          currentStep: 0,
+          status: "waiting_answer"
+        });
+
+        return res.sendStatus(200);
+      }
+
+      if (consent === "rejected") {
+        await updateConversation(
+          conversation.conversationId,
+          { status: "cancelled" }
+        );
+
+        console.log("Entrevista cancelada por el candidato.");
+        return res.sendStatus(200);
+      }
+
+      console.log("Respuesta ambigua. No se modifica la conversación.");
+      return res.sendStatus(200);
+    }
+
+    if (conversation.status === "waiting_answer") {
       console.log(
-        "Procesando respuesta de la pregunta:",
+        "Mensaje agregado al buffer para la pregunta:",
         conversation.currentStep
       );
 
-
-      await advanceConversation(
-
-        conversation,
-
-        text
-
+      addMessage(
+        conversation.conversationId,
+        messageId,
+        text,
+        async (combinedText) => {
+          await processBufferedAnswer(
+            data,
+            candidatePhone,
+            conversation.conversationId,
+            combinedText
+          );
+        }
       );
 
-
       return res.sendStatus(200);
-
     }
 
-
-    // --------------------------------------------------
-    // OTROS ESTADOS
-    // --------------------------------------------------
-
-    console.log(
-      "Estado actual:",
-      conversation.status
-    );
-
-
+    console.log("Estado actual:", conversation.status);
     return res.sendStatus(200);
 
-
   } catch (error) {
-
-    console.error(
-      "Error procesando webhook:"
-    );
-
+    console.error("Error procesando webhook:");
     console.error(error);
 
-
     return res.status(500).json({
-
-      error:
-        error.message
-
+      error: error.message
     });
-
   }
-
 }
 
-
-router.post(
-  "/webhook",
-  handler
-);
-
-
-router.post(
-  "/webhook/messages-upsert",
-  handler
-);
-
+router.post("/webhook", handler);
+router.post("/webhook/messages-upsert", handler);
 
 module.exports = router;
