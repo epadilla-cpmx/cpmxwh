@@ -1,11 +1,19 @@
 const axios = require("axios");
 
+const {
+  normalizePhone
+} = require("./phone");
+
+
 async function sendMessage(instance, number, text) {
+
+  const normalizedNumber =
+    normalizePhone(number);
 
   const response = await axios.post(
     `${process.env.EVOLUTION_URL}/message/sendText/${instance}`,
     {
-      number,
+      number: normalizedNumber,
       text
     },
     {
@@ -17,6 +25,7 @@ async function sendMessage(instance, number, text) {
 
   return response.data;
 }
+
 
 module.exports = {
   sendMessage
