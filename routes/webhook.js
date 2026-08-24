@@ -1,5 +1,9 @@
 const express = require("express");
 const router = express.Router();
+const {
+  findConversation
+} = require("../services/conversationFinder");
+
 
 async function handler(req, res) {
 
@@ -52,20 +56,68 @@ async function handler(req, res) {
     console.log("Número:", remoteJid);
     console.log("Mensaje:", text);
 
-    // 7. Si no encontramos número o texto, ignoramos
-    if (!remoteJid || !text) {
+   const candidatePhone =
+  remoteJid.replace("@s.whatsapp.net", "");
 
-      console.log("No se encontró número o texto.");
+console.log(
+  "Buscando conversación para:",
+  candidatePhone
+);
 
-      return res.sendStatus(200);
-    }
+const conversation =
+  await findConversation(
+    data.instance,
+    candidatePhone
+  );
 
-    // 8. Aquí posteriormente procesaremos la respuesta
-    // de acuerdo con la conversación correspondiente.
+if (!conversation) {
 
-    // Respondemos inmediatamente a Evolution
-    return res.sendStatus(200);
+  console.log(
+    "No se encontró una conversación activa."
+  );
 
+  return res.sendStatus(200);
+}
+
+console.log(
+  "Conversación encontrada:",
+  conversation
+);
+
+
+// --------------------------------------------------
+// PROCESAR ESTADO ACTUAL
+// --------------------------------------------------
+
+if (conversation.status === "waiting_start") {
+
+  console.log(
+    "La conversación está esperando consentimiento."
+  );
+
+  console.log(
+    "Respuesta recibida:",
+    text
+  );
+
+  // Por ahora solamente registramos
+  // la respuesta para depurar.
+  // La lógica de consentimiento vendrá después.
+
+  return res.sendStatus(200);
+}
+
+
+// --------------------------------------------------
+// OTROS ESTADOS
+// --------------------------------------------------
+
+console.log(
+  "Estado actual:",
+  conversation.status
+);
+
+return res.sendStatus(200);
   } catch (error) {
 
     console.error("Error procesando webhook:");
@@ -80,7 +132,6 @@ async function handler(req, res) {
 }
 
 router.post("/webhook", handler);
-
 router.post("/webhook/messages-upsert", handler);
 
 module.exports = router;
