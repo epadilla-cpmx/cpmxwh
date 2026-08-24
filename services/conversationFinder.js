@@ -14,7 +14,6 @@ const TARGET_SHEET_ID = process.env.TARGET_SHEET_ID;
 async function findConversation(recruiterInstance, candidatePhone) {
   const sheets = google.sheets({ version: "v4", auth });
   const normalizedPhone = normalizePhone(candidatePhone);
-
   const response = await sheets.spreadsheets.values.get({
     spreadsheetId: TARGET_SHEET_ID,
     range: "Motor!A:Q"
@@ -22,8 +21,10 @@ async function findConversation(recruiterInstance, candidatePhone) {
 
   const rows = response.data.values || [];
 
-  for (const row of rows.slice(1)) {
+  for (let index = 1; index < rows.length; index++) {
+    const row = rows[index];
     const conversation = {
+      motorRow: index + 1,
       conversationId: row[0],
       recruiterInstance: row[1],
       recruiterName: row[2],
