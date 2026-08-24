@@ -1,194 +1,85 @@
 const { google } = require("googleapis");
-
-const {
-  getScript
-} = require("./scriptLoader");
-
-const {
-  buildMessage
-} = require("./messageBuilder");
-
-const {
-  sendMessage,
-  sendPresence
-} = require("./evolution");
-
-const {
-  updateConversation
-} = require("./conversationUpdater");
-
-const {
-  delay
-} = require("./delay");
-
+const { getScript } = require("./scriptLoader");
+const { buildMessage } = require("./messageBuilder");
+const { sendMessage } = require("./evolution");
+const { updateConversation } = require("./conversationUpdater");
+const { delay } = require("./delay");
 
 const auth = new google.auth.GoogleAuth({
-
   credentials: {
-
-    client_email:
-      process.env.GOOGLE_CLIENT_EMAIL,
-
-    private_key:
-      process.env.GOOGLE_PRIVATE_KEY.replace(/\\n/g, "\n")
-
+    client_email: process.env.GOOGLE_CLIENT_EMAIL,
+    private_key: process.env.GOOGLE_PRIVATE_KEY.replace(/\\n/g, "\n")
   },
-
-  scopes: [
-    "https://www.googleapis.com/auth/spreadsheets"
-  ]
-
+  scopes: ["https://www.googleapis.com/auth/spreadsheets"]
 });
 
-
-const TARGET_SHEET_ID =
-  process.env.TARGET_SHEET_ID;
-
+const TARGET_SHEET_ID = process.env.TARGET_SHEET_ID;
 
 function getSheetsClient() {
-
-  return google.sheets({
-    version: "v4",
-    auth
-  });
-
+  return google.sheets({ version: "v4", auth });
 }
 
-
-async function saveAnswer(
-  conversation,
-  step,
-  answer
-) {
-
+async function saveAnswer(conversation, step, answer) {
   const sheets = getSheetsClient();
-
   await sheets.spreadsheets.values.update({
-
     spreadsheetId: TARGET_SHEET_ID,
-
-    range:
-      `${conversation.targetSheet}!${step.column}${conversation.targetRow}`,
-
+    range: `${conversation.targetSheet}!${step.column}${conversation.targetRow}`,
     valueInputOption: "RAW",
-
-    requestBody: {
-      values: [[answer]]
-    }
-
+    requestBody: { values: [[answer]] }
   });
-
-  console.log(
-    `Respuesta guardada en ${conversation.targetSheet}!${step.column}${conversation.targetRow}`
-  );
-
+  console.log(`Respuesta guardada en ${conversation.targetSheet}!${step.column}${conversation.targetRow}`);
 }
-
 
 function getStep(conversation) {
-
-  const script =
-    getScript(conversation.scriptId);
-
-  return script.steps[
-    conversation.currentStep
-  ];
-
+  const script = getScript(conversation.scriptId);
+  return script.steps[conversation.currentStep];
 }
 
-
 async function sendCurrentStep(conversation) {
+  const script = getScript(conversation.scriptId);
+  const step = script.steps[conversation.currentStep];
 
-  const script =
-    getScript(conversation.scriptId);
+  if (!step) return finishConversation(conversation);
 
-  const step =
-    script.steps[conversation.currentStep];
+  const question = buildMessage(step.question, {
+    candidateName: conversation.candidateName,
+    vacancyName: conversation.vacancyName,
+    recruiterName: conversation.recruiterName
+  });
 
-
-  if (!step) {
-    return finishConversation(conversation);
-  }
-
-
-  const question =
-    buildMessage(step.question, {
-      candidateName: conversation.candidateName,
-      vacancyName: conversation.vacancyName,
-      recruiterName: conversation.recruiterName
-    });
-
-
-  const QUESTION_DELAY_MS =
-    Number(
-      process.env.QUESTION_DELAY_MS ||
-      process.env.MESSAGE_DELAY_MS ||
-      30000
-    );
-
-
-  console.log(
-    "Iniciando typing antes de la siguiente pregunta..."
+  const QUESTION_DELAY_MS = Number(
+    process.env.QUESTION_DELAY_MS ||
+    process.env.MESSAGE_DELAY_MS ||
+    30000
   );
 
-
-  await sendPresence(
-    conversation.recruiterInstance,
-    conversation.candidatePhone,
-    "composing"
-  );
-
-
+  console.log(`Esperando ${QUESTION_DELAY_MS} ms antes de enviar la siguiente pregunta...`);
   await delay(QUESTION_DELAY_MS);
 
+  console.log("Enviando pregunta:", question);
 
-  await sendPresence(
+  const response = await sendMessage(
     conversation.recruiterInstance,
     conversation.candidatePhone,
-    "paused"
-  );
-
-
-  console.log(
-    "Enviando pregunta:",
     question
   );
 
-
-  const response =
-    await sendMessage(
-      conversation.recruiterInstance,
-      conversation.candidatePhone,
-      question
-    );
-
-
-  console.log(
-    "Respuesta de Evolution:",
-    response
-  );
-
+  console.log("Respuesta de Evolution:", response);
 
   return {
     type: "question_sent",
     step: conversation.currentStep,
     question
   };
-
 }
 
-
 async function finishConversation(conversation) {
-
-  const script =
-    getScript(conversation.scriptId);
-
-  const goodbye =
-    buildMessage(script.goodbye, {
-      candidateName: conversation.candidateName,
-      vacancyName: conversation.vacancyName,
-      recruiterName: conversation.recruiterName
-    });
+  const script = getScript(conversation.scriptId);
+  const goodbye = buildMessage(script.goodbye, {
+    candidateName: conversation.candidateName,
+    vacancyName: conversation.vacancyName,
+    recruiterName: conversation.recruiterName
+  });
 
   console.log("Entrevista terminada.");
 
@@ -198,55 +89,32 @@ async function finishConversation(conversation) {
     goodbye
   );
 
-  return {
-    type: "completed",
-    goodbye
-  };
-
+  return { type: "completed", goodbye };
 }
 
-
 async function processAnswer(conversation, answer) {
-
   const step = getStep(conversation);
 
-  if (!step) {
-    return finishConversation(conversation);
-  }
+  if (!step) return finishConversation(conversation);
 
-  console.log(
-    "Procesando respuesta para:",
-    step.question
-  );
+  console.log("Procesando respuesta para:", step.question);
 
-  await saveAnswer(
-    conversation,
-    step,
-    answer
-  );
+  await saveAnswer(conversation, step, answer);
 
-  const nextStep =
-    conversation.currentStep + 1;
+  const nextStep = conversation.currentStep + 1;
 
   return {
     type: "answer_processed",
     currentStep: conversation.currentStep,
     nextStep
   };
-
 }
 
-
 async function advanceConversation(conversation, answer) {
-
-  const result =
-    await processAnswer(conversation, answer);
-
-  const script =
-    getScript(conversation.scriptId);
+  const result = await processAnswer(conversation, answer);
+  const script = getScript(conversation.scriptId);
 
   if (result.nextStep >= script.steps.length) {
-
     await updateConversation(
       conversation.conversationId,
       {
@@ -266,16 +134,12 @@ async function advanceConversation(conversation, answer) {
     }
   );
 
-  const nextConversation = {
+  return sendCurrentStep({
     ...conversation,
     currentStep: result.nextStep,
     status: "waiting_answer"
-  };
-
-  return sendCurrentStep(nextConversation);
-
+  });
 }
-
 
 module.exports = {
   saveAnswer,
