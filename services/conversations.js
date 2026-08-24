@@ -1,5 +1,8 @@
 const { google } = require("googleapis");
 
+const { buildMessage } = require("./messageBuilder");
+const { getScript } = require("./scriptLoader");
+
 
 // --------------------------------------------------
 // AUTENTICACIÓN DE GOOGLE
@@ -101,7 +104,6 @@ async function getNextRow(sheetName) {
   const sheets =
     await getSheetsClient();
 
-
   const response =
     await sheets.spreadsheets.values.get({
 
@@ -111,14 +113,8 @@ async function getNextRow(sheetName) {
 
     });
 
-
   const values =
     response.data.values || [];
-
-
-  // La fila 1 contiene encabezados.
-  // Si solamente existe la fila de encabezados,
-  // la siguiente fila será la 2.
 
   return values.length + 1;
 
@@ -134,7 +130,6 @@ async function getNextConversationId() {
   const sheets =
     await getSheetsClient();
 
-
   const response =
     await sheets.spreadsheets.values.get({
 
@@ -144,17 +139,11 @@ async function getNextConversationId() {
 
     });
 
-
   const values =
     response.data.values || [];
 
-
-  // Si solamente existe el encabezado
-  // comenzamos desde 1.
-
   const conversationNumber =
     values.length;
-
 
   return `CONV-${String(conversationNumber).padStart(4, "0")}`;
 
@@ -170,52 +159,67 @@ async function createConversation(data) {
   const sheets =
     await getSheetsClient();
 
-
   const targetSheet =
     getTargetSheet(
       data.recruiterInstance
     );
-
 
   const targetRow =
     await getNextRow(
       targetSheet
     );
 
-
   const conversationId =
     await getNextConversationId();
 
-    // --------------------------------------------------
-// REGISTRAR CANDIDATO EN LA HOJA DEL RECLUTADOR
-// --------------------------------------------------
 
-await sheets.spreadsheets.values.append({
+  // --------------------------------------------------
+  // CARGAR Y PERSONALIZAR EL GUION
+  // --------------------------------------------------
 
-  spreadsheetId:
-    TARGET_SHEET_ID,
+  const script =
+    getScript(data.scriptId);
 
-  range: `${targetSheet}!A:B`,
+  const greeting =
+    buildMessage(
+      script.greeting,
+      {
+        candidateName: data.candidateName,
+        vacancyName: data.vacancyName,
+        recruiterName: data.recruiterName
+      }
+    );
 
-  valueInputOption: "RAW",
 
-  insertDataOption: "INSERT_ROWS",
+  // --------------------------------------------------
+  // REGISTRAR CANDIDATO EN LA HOJA DEL RECLUTADOR
+  // --------------------------------------------------
 
-  requestBody: {
+  await sheets.spreadsheets.values.append({
 
-    values: [[
-      data.vacancyId,
-      data.candidateName
-    ]]
+    spreadsheetId:
+      TARGET_SHEET_ID,
 
-  }
+    range: `${targetSheet}!A:B`,
 
-});
+    valueInputOption: "RAW",
+
+    insertDataOption: "INSERT_ROWS",
+
+    requestBody: {
+
+      values: [[
+        data.vacancyId,
+        data.candidateName
+      ]]
+
+    }
+
+  });
 
 
   const now =
     new Date().toISOString();
-
 
   const row = [
 
@@ -247,7 +251,6 @@ await sheets.spreadsheets.values.append({
 
   ];
 
-
   await sheets.spreadsheets.values.append({
 
     spreadsheetId:
@@ -261,14 +264,11 @@ await sheets.spreadsheets.values.append({
 
     requestBody: {
 
-      values: [
-        row
-      ]
+      values: [row]
 
     }
 
   });
-
 
   return {
 
@@ -276,7 +276,9 @@ await sheets.spreadsheets.values.append({
 
     targetSheet,
 
-    targetRow
+    targetRow,
+
+    greeting
 
   };
 
