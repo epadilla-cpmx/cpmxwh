@@ -1,137 +1,419 @@
 const express = require("express");
-const router = express.Router();
+
+const router =
+  express.Router();
+
+
 const {
   findConversation
 } = require("../services/conversationFinder");
 
 
+const {
+  getConsentResult
+} = require("../services/consent");
+
+
+const {
+  updateConversation
+} = require("../services/conversationUpdater");
+
+
+const {
+  sendCurrentStep,
+  advanceConversation
+} = require("../services/conversationEngine");
+
+
+// --------------------------------------------------
+// WEBHOOK
+// --------------------------------------------------
+
 async function handler(req, res) {
 
   try {
 
-    const data = req.body;
+    const data =
+      req.body;
 
-    console.log("Webhook recibido");
-    console.log("Evento:", data.event);
-    console.log("Instancia:", data.instance);
 
-    // 1. Solo nos interesan mensajes nuevos
-    if (data.event !== "messages.upsert") {
+    console.log(
+      "Webhook recibido"
+    );
 
-      console.log("Evento ignorado");
+    console.log(
+      "Evento:",
+      data.event
+    );
+
+    console.log(
+      "Instancia:",
+      data.instance
+    );
+
+
+    // --------------------------------------------------
+    // SOLO MENSAJES NUEVOS
+    // --------------------------------------------------
+
+    if (
+      data.event !==
+      "messages.upsert"
+    ) {
+
+      console.log(
+        "Evento ignorado"
+      );
 
       return res.sendStatus(200);
+
     }
 
-    // 2. Extraer información del mensaje
-    const key = data.data?.key;
 
-    // 3. Ignorar mensajes enviados por nosotros
-    if (key?.fromMe === true) {
+    // --------------------------------------------------
+    // OBTENER KEY
+    // --------------------------------------------------
 
-      console.log("Mensaje enviado por nosotros. Ignorado.");
+    const key =
+      data.data?.key;
+
+
+    // --------------------------------------------------
+    // IGNORAR MENSAJES PROPIOS
+    // --------------------------------------------------
+
+    if (
+      key?.fromMe === true
+    ) {
+
+      console.log(
+        "Mensaje enviado por nosotros. Ignorado."
+      );
 
       return res.sendStatus(200);
+
     }
 
-    // 4. Identificar el número que envió el mensaje
-    const remoteJid = key?.remoteJid;
 
-    // 5. Ignorar mensajes provenientes de grupos
-    if (remoteJid?.endsWith("@g.us")) {
+    // --------------------------------------------------
+    // OBTENER NÚMERO
+    // --------------------------------------------------
 
-      console.log("Mensaje de grupo. Ignorado.");
+    const remoteJid =
+      key?.remoteJid;
+
+
+    if (!remoteJid) {
+
+      console.log(
+        "No se encontró remoteJid."
+      );
 
       return res.sendStatus(200);
+
     }
 
-    // 6. Extraer el texto
-    const message = data.data?.message;
+
+    // --------------------------------------------------
+    // IGNORAR GRUPOS
+    // --------------------------------------------------
+
+    if (
+      remoteJid.endsWith(
+        "@g.us"
+      )
+    ) {
+
+      console.log(
+        "Mensaje de grupo. Ignorado."
+      );
+
+      return res.sendStatus(200);
+
+    }
+
+
+    // --------------------------------------------------
+    // OBTENER MENSAJE
+    // --------------------------------------------------
+
+    const message =
+      data.data?.message;
+
 
     const text =
       message?.conversation ||
       message?.extendedTextMessage?.text ||
       "";
 
-    console.log("Número:", remoteJid);
-    console.log("Mensaje:", text);
 
-   const candidatePhone =
-  remoteJid.replace("@s.whatsapp.net", "");
+    console.log(
+      "Número:",
+      remoteJid
+    );
 
-console.log(
-  "Buscando conversación para:",
-  candidatePhone
-);
-
-const conversation =
-  await findConversation(
-    data.instance,
-    candidatePhone
-  );
-
-if (!conversation) {
-
-  console.log(
-    "No se encontró una conversación activa."
-  );
-
-  return res.sendStatus(200);
-}
-
-console.log(
-  "Conversación encontrada:",
-  conversation
-);
+    console.log(
+      "Mensaje:",
+      text
+    );
 
 
-// --------------------------------------------------
-// PROCESAR ESTADO ACTUAL
-// --------------------------------------------------
+    if (!text) {
 
-if (conversation.status === "waiting_start") {
+      console.log(
+        "Mensaje sin texto. Ignorado."
+      );
 
-  console.log(
-    "La conversación está esperando consentimiento."
-  );
+      return res.sendStatus(200);
 
-  console.log(
-    "Respuesta recibida:",
-    text
-  );
-
-  // Por ahora solamente registramos
-  // la respuesta para depurar.
-  // La lógica de consentimiento vendrá después.
-
-  return res.sendStatus(200);
-}
+    }
 
 
-// --------------------------------------------------
-// OTROS ESTADOS
-// --------------------------------------------------
+    // --------------------------------------------------
+    // OBTENER TELÉFONO
+    // --------------------------------------------------
 
-console.log(
-  "Estado actual:",
-  conversation.status
-);
+    const candidatePhone =
+      remoteJid.replace(
+        "@s.whatsapp.net",
+        ""
+      );
 
-return res.sendStatus(200);
+
+    console.log(
+      "Buscando conversación para:",
+      candidatePhone
+    );
+
+
+    // --------------------------------------------------
+    // BUSCAR CONVERSACIÓN
+    // --------------------------------------------------
+
+    const conversation =
+      await findConversation(
+
+        data.instance,
+
+        candidatePhone
+
+      );
+
+
+    if (!conversation) {
+
+      console.log(
+        "No se encontró una conversación activa."
+      );
+
+      return res.sendStatus(200);
+
+    }
+
+
+    console.log(
+      "Conversación encontrada:",
+      conversation
+    );
+
+
+    // --------------------------------------------------
+    // ESPERANDO CONSENTIMIENTO
+    // --------------------------------------------------
+
+    if (
+      conversation.status ===
+      "waiting_start"
+    ) {
+
+      console.log(
+        "La conversación está esperando consentimiento."
+      );
+
+
+      const consent =
+        getConsentResult(
+          text
+        );
+
+
+      console.log(
+        "Resultado del consentimiento:",
+        consent
+      );
+
+
+      // ----------------------------------------------
+      // ACEPTADO
+      // ----------------------------------------------
+
+      if (
+        consent === "accepted"
+      ) {
+
+        await updateConversation(
+
+          conversation.conversationId,
+
+          {
+            currentStep: 0,
+            status: "waiting_answer"
+          }
+
+        );
+
+
+        const updatedConversation = {
+
+          ...conversation,
+
+          currentStep: 0,
+
+          status:
+            "waiting_answer"
+
+        };
+
+
+        console.log(
+          "Consentimiento aceptado."
+        );
+
+
+        await sendCurrentStep(
+          updatedConversation
+        );
+
+
+        return res.sendStatus(200);
+
+      }
+
+
+      // ----------------------------------------------
+      // RECHAZADO
+      // ----------------------------------------------
+
+      if (
+        consent === "rejected"
+      ) {
+
+        await updateConversation(
+
+          conversation.conversationId,
+
+          {
+            status:
+              "cancelled"
+          }
+
+        );
+
+
+        console.log(
+          "Entrevista cancelada por el candidato."
+        );
+
+
+        return res.sendStatus(200);
+
+      }
+
+
+      // ----------------------------------------------
+      // AMBIGUO
+      // ----------------------------------------------
+
+      console.log(
+        "Respuesta ambigua. No se modifica la conversación."
+      );
+
+
+      return res.sendStatus(200);
+
+    }
+
+
+    // --------------------------------------------------
+    // ESPERANDO RESPUESTA A UNA PREGUNTA
+    // --------------------------------------------------
+
+    if (
+      conversation.status ===
+      "waiting_answer"
+    ) {
+
+      console.log(
+        "Procesando respuesta de la pregunta:",
+        conversation.currentStep
+      );
+
+
+      await advanceConversation(
+
+        conversation,
+
+        text
+
+      );
+
+
+      return res.sendStatus(200);
+
+    }
+
+
+    // --------------------------------------------------
+    // OTROS ESTADOS
+    // --------------------------------------------------
+
+    console.log(
+      "Estado actual:",
+      conversation.status
+    );
+
+
+    return res.sendStatus(200);
+
+
   } catch (error) {
 
-    console.error("Error procesando webhook:");
-    console.error(error);
+    console.error(
+      "Error procesando webhook:"
+    );
+
+    console.error(
+      error
+    );
+
 
     return res.status(500).json({
-      error: error.message
+
+      error:
+        error.message
+
     });
 
   }
 
 }
 
-router.post("/webhook", handler);
-router.post("/webhook/messages-upsert", handler);
 
-module.exports = router;
+// --------------------------------------------------
+// RUTAS
+// --------------------------------------------------
+
+router.post(
+  "/webhook",
+  handler
+);
+
+
+router.post(
+  "/webhook/messages-upsert",
+  handler
+);
+
+
+module.exports =
+  router;
