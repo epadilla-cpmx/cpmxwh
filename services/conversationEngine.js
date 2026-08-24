@@ -13,6 +13,9 @@ const auth = new google.auth.GoogleAuth({
 });
 
 const TARGET_SHEET_ID = process.env.TARGET_SHEET_ID;
+const MESSAGE_DELAY_MS = Number(
+  process.env.MESSAGE_DELAY_MS || process.env.QUESTION_DELAY_MS || 5000
+);
 
 function getSheetsClient() {
   return google.sheets({ version: "v4", auth });
@@ -46,20 +49,14 @@ async function sendCurrentStep(conversation) {
     recruiterName: conversation.recruiterName
   });
 
-  const QUESTION_DELAY_MS = Number(
-    process.env.QUESTION_DELAY_MS ||
-    process.env.MESSAGE_DELAY_MS ||
-    30000
-  );
-
-  console.log(`Enviando pregunta con typing durante ${QUESTION_DELAY_MS} ms...`);
+  console.log(`Enviando pregunta con typing durante ${MESSAGE_DELAY_MS} ms...`);
 
   const response = await sendMessage(
     conversation.recruiterInstance,
     conversation.candidatePhone,
     question,
     {
-      delayMs: QUESTION_DELAY_MS,
+      delayMs: MESSAGE_DELAY_MS,
       presence: "composing"
     }
   );
