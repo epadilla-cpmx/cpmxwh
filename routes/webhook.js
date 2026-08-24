@@ -7,11 +7,11 @@ const { updateConversation } = require("../services/conversationUpdater");
 const { sendCurrentStep } = require("../services/conversationEngine");
 const { markMessageAsRead } = require("../services/evolution");
 const { appendMessage } = require("../services/responseBuffer");
+const { processConversationBuffer } = require("../services/responseProcessor");
 
 async function handler(req, res) {
   try {
     const data = req.body;
-
     console.log("Webhook recibido");
     console.log("Evento:", data.event);
     console.log("Instancia:", data.instance);
@@ -23,7 +23,6 @@ async function handler(req, res) {
 
     const remoteJid = key?.remoteJid;
     const messageId = key?.id;
-
     if (!remoteJid || remoteJid.endsWith("@g.us")) return res.sendStatus(200);
 
     const message = data.data?.message;
@@ -58,11 +57,7 @@ async function handler(req, res) {
           currentStep: 0,
           status: "waiting_answer"
         });
-
-        return res.sendStatus(200);
-      }
-
-      if (consent === "rejected") {
+      } else if (consent === "rejected") {
         await updateConversation(conversation.conversationId, {
           status: "cancelled",
           pendingResponse: "",
@@ -75,11 +70,7 @@ async function handler(req, res) {
     }
 
     if (conversation.status === "waiting_answer") {
-      console.log(
-        "Agregando mensaje al buffer. Pregunta actual:",
-        conversation.currentStep
-      );
-
+      console.log("Agregando mensaje al buffer. Pregunta actual:", conversation.currentStep);
       await appendMessage(conversation, messageId, text);
       return res.sendStatus(200);
     }
@@ -91,7 +82,23 @@ async function handler(req, res) {
   }
 }
 
+async function processBufferHandler(req, res) {
+  try {
+    const { conversationId, recruiterInstance } = req.body || {};
+    if (!conversationId || !recruiterInstance) {
+      return res.status(400).json({ error: "conversationId y recruiterInstance son requeridos" });
+    }
+
+    const result = await processConversationBuffer(conversationId, recruiterInstance);
+    return res.status(200).json(result);
+  } catch (error) {
+    console.error("Error procesando buffer:", error);
+    return res.status(500).json({ error: error.message });
+  }
+}
+
 router.post("/webhook", handler);
 router.post("/webhook/messages-upsert", handler);
+router.post("/internal/process-buffer", processBufferHandler);
 
 module.exports = router;
