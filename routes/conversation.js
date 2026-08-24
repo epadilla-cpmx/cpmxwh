@@ -5,12 +5,24 @@ const { sendMessage } =
   require("../services/evolution");
 
 const {
+  delay
+} = require("../services/delay");
+
+const {
   getScript
 } = require("../services/scriptLoader");
 
 const {
   createConversation
 } = require("../services/conversations");
+
+
+const INITIAL_MESSAGE_DELAY_MS =
+  Number(
+    process.env.INITIAL_MESSAGE_DELAY_MS ||
+    process.env.MESSAGE_DELAY_MS ||
+    30000
+  );
 
 
 router.post("/conversation/start", async (req, res) => {
@@ -106,7 +118,10 @@ router.post("/conversation/start", async (req, res) => {
       script.steps.length
     );
 
-    for (const candidate of data.candidates) {
+    for (let i = 0; i < data.candidates.length; i++) {
+
+      const candidate =
+        data.candidates[i];
 
       console.log(
         "Creando conversación para:",
@@ -140,17 +155,31 @@ router.post("/conversation/start", async (req, res) => {
 
         });
 
-        const evolutionResponse =
-  await sendMessage(
-    data.recruiterInstance,
-    candidate.phone,
-    conversation.greeting
-  );
 
-console.log(
-  "Mensaje enviado por Evolution:",
-  evolutionResponse
-);
+      // ----------------------------------------------
+      // ESPERAR ANTES DEL MENSAJE INICIAL
+      // ----------------------------------------------
+
+      console.log(
+        `Esperando ${INITIAL_MESSAGE_DELAY_MS} ms antes del mensaje inicial...`
+      );
+
+      await delay(
+        INITIAL_MESSAGE_DELAY_MS
+      );
+
+
+      const evolutionResponse =
+        await sendMessage(
+          data.recruiterInstance,
+          candidate.phone,
+          conversation.greeting
+        );
+
+      console.log(
+        "Mensaje enviado por Evolution:",
+        evolutionResponse
+      );
 
 
       conversations.push(conversation);
