@@ -1,11 +1,8 @@
 const axios = require("axios");
-
 const { normalizePhone } = require("./phone");
 const { isWithinSendingHours } = require("./schedule");
 
-const headers = {
-  apikey: process.env.EVOLUTION_API_KEY
-};
+const headers = { apikey: process.env.EVOLUTION_API_KEY };
 
 async function sendMessage(instance, number, text, options = {}) {
   if (!isWithinSendingHours()) {
@@ -15,7 +12,6 @@ async function sendMessage(instance, number, text, options = {}) {
 
   const normalizedNumber = normalizePhone(number);
   const body = { number: normalizedNumber, text };
-
   if (options.delayMs) body.delay = options.delayMs;
   if (options.presence) body.presence = options.presence;
 
@@ -39,13 +35,7 @@ async function markMessageAsRead(instance, remoteJid, messageId) {
     const response = await axios.post(
       `${process.env.EVOLUTION_URL}/chat/markMessageAsRead/${instance}`,
       {
-        readMessages: [
-          {
-            remoteJid,
-            id: messageId,
-            fromMe: false
-          }
-        ]
+        readMessages: [{ remoteJid, id: messageId, fromMe: false }]
       },
       { headers }
     );
@@ -58,7 +48,4 @@ async function markMessageAsRead(instance, remoteJid, messageId) {
   }
 }
 
-module.exports = {
-  sendMessage,
-  markMessageAsRead
-};
+module.exports = { sendMessage, markMessageAsRead };
