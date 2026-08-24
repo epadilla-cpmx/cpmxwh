@@ -34,21 +34,21 @@ const TARGET_SHEET_ID =
 // Relación provisional entre instancia y pestaña
 const recruiterSheets = {
 
-  "Main": "erick",
+  "Main": "Erick",
 
-  "Recruiter_01": "johanna",
+  "Recruiter_01": "Johanna",
 
-  "Recruiter_02": "heidy",
+  "Recruiter_02": "Heidy",
 
-  "Recruiter_03": "arely",
+  "Recruiter_03": "Arely",
 
-  "Recruiter_04": "diana",
+  "Recruiter_04": "Diana",
 
-  "Recruiter_05": "mia",
+  "Recruiter_05": "Mia",
 
-  "Recruiter_06": "angel",
+  "Recruiter_06": "Angel",
 
-  "Recruiter_07": "majo"
+  "Recruiter_07": "Majo"
 
 };
 
@@ -185,6 +185,32 @@ async function createConversation(data) {
 
   const conversationId =
     await getNextConversationId();
+
+    // --------------------------------------------------
+// REGISTRAR CANDIDATO EN LA HOJA DEL RECLUTADOR
+// --------------------------------------------------
+
+await sheets.spreadsheets.values.append({
+
+  spreadsheetId:
+    TARGET_SHEET_ID,
+
+  range: `${targetSheet}!A:B`,
+
+  valueInputOption: "RAW",
+
+  insertDataOption: "INSERT_ROWS",
+
+  requestBody: {
+
+    values: [[
+      data.vacancyId,
+      data.candidateName
+    ]]
+
+  }
+
+});
 
 
   const now =
