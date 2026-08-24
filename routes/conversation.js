@@ -2,6 +2,10 @@ const express = require("express");
 const router = express.Router();
 
 const {
+  getScript
+} = require("../services/scriptLoader");
+
+const {
   createConversation
 } = require("../services/conversations");
 
@@ -87,6 +91,17 @@ router.post("/conversation/start", async (req, res) => {
 
     const conversations = [];
 
+    const script = getScript(data.scriptId);
+
+    console.log(
+      "Guion cargado:",
+      script.id
+    );
+
+    console.log(
+      "Número de preguntas:",
+      script.steps.length
+    );
 
     for (const candidate of data.candidates) {
 
