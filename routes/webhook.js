@@ -1,8 +1,6 @@
 const express = require("express");
 const router = express.Router();
 
-const { saveResponse } = require("../services/sheets");
-
 async function handler(req, res) {
 
   try {
@@ -35,7 +33,15 @@ async function handler(req, res) {
     // 4. Identificar el número que envió el mensaje
     const remoteJid = key?.remoteJid;
 
-    // 5. Extraer el texto
+    // 5. Ignorar mensajes provenientes de grupos
+    if (remoteJid?.endsWith("@g.us")) {
+
+      console.log("Mensaje de grupo. Ignorado.");
+
+      return res.sendStatus(200);
+    }
+
+    // 6. Extraer el texto
     const message = data.data?.message;
 
     const text =
@@ -46,7 +52,7 @@ async function handler(req, res) {
     console.log("Número:", remoteJid);
     console.log("Mensaje:", text);
 
-    // 6. Si no encontramos texto, ignoramos
+    // 7. Si no encontramos número o texto, ignoramos
     if (!remoteJid || !text) {
 
       console.log("No se encontró número o texto.");
@@ -54,15 +60,18 @@ async function handler(req, res) {
       return res.sendStatus(200);
     }
 
-    // 7. Guardar respuesta en Google Sheets
-    
+    // 8. Aquí posteriormente procesaremos la respuesta
+    // de acuerdo con la conversación correspondiente.
+
+    // Respondemos inmediatamente a Evolution
+    return res.sendStatus(200);
 
   } catch (error) {
 
     console.error("Error procesando webhook:");
     console.error(error);
 
-    res.status(500).json({
+    return res.status(500).json({
       error: error.message
     });
 
