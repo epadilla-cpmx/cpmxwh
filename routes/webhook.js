@@ -5,7 +5,6 @@ const { findConversation } = require("../services/conversationFinder");
 const { getConsentResult } = require("../services/consent");
 const { updateConversation } = require("../services/conversationUpdater");
 const { sendCurrentStep, advanceConversation } = require("../services/conversationEngine");
-const { markMessageAsRead } = require("../services/evolution");
 
 async function handler(req, res) {
   try {
@@ -70,27 +69,10 @@ async function handler(req, res) {
 
     console.log("Conversación encontrada:", conversation);
 
-    if (key?.id) {
-      try {
-        await markMessageAsRead(
-          data.instance,
-          remoteJid,
-          key.id
-        );
-        console.log("Mensaje marcado como leído.");
-      } catch (error) {
-        console.error(
-          "No se pudo marcar como leído:",
-          error.message
-        );
-      }
-    }
-
     if (conversation.status === "waiting_start") {
       console.log("La conversación está esperando consentimiento.");
 
       const consent = getConsentResult(text);
-
       console.log("Resultado del consentimiento:", consent);
 
       if (consent === "accepted") {
@@ -121,9 +103,7 @@ async function handler(req, res) {
         return res.sendStatus(200);
       }
 
-      console.log(
-        "Respuesta ambigua. No se modifica la conversación."
-      );
+      console.log("Respuesta ambigua. No se modifica la conversación.");
       return res.sendStatus(200);
     }
 
