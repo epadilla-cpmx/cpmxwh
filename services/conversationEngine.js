@@ -3,7 +3,6 @@ const { getScript } = require("./scriptLoader");
 const { buildMessage } = require("./messageBuilder");
 const { sendMessage } = require("./evolution");
 const { updateConversation } = require("./conversationUpdater");
-const { delay } = require("./delay");
 
 const auth = new google.auth.GoogleAuth({
   credentials: {
@@ -53,15 +52,16 @@ async function sendCurrentStep(conversation) {
     30000
   );
 
-  console.log(`Esperando ${QUESTION_DELAY_MS} ms antes de enviar la siguiente pregunta...`);
-  await delay(QUESTION_DELAY_MS);
-
-  console.log("Enviando pregunta:", question);
+  console.log(`Enviando pregunta con typing durante ${QUESTION_DELAY_MS} ms...`);
 
   const response = await sendMessage(
     conversation.recruiterInstance,
     conversation.candidatePhone,
-    question
+    question,
+    {
+      delayMs: QUESTION_DELAY_MS,
+      presence: "composing"
+    }
   );
 
   console.log("Respuesta de Evolution:", response);
@@ -94,19 +94,15 @@ async function finishConversation(conversation) {
 
 async function processAnswer(conversation, answer) {
   const step = getStep(conversation);
-
   if (!step) return finishConversation(conversation);
 
   console.log("Procesando respuesta para:", step.question);
-
   await saveAnswer(conversation, step, answer);
-
-  const nextStep = conversation.currentStep + 1;
 
   return {
     type: "answer_processed",
     currentStep: conversation.currentStep,
-    nextStep
+    nextStep: conversation.currentStep + 1
   };
 }
 
@@ -115,24 +111,17 @@ async function advanceConversation(conversation, answer) {
   const script = getScript(conversation.scriptId);
 
   if (result.nextStep >= script.steps.length) {
-    await updateConversation(
-      conversation.conversationId,
-      {
-        currentStep: result.nextStep,
-        status: "completed"
-      }
-    );
-
+    await updateConversation(conversation.conversationId, {
+      currentStep: result.nextStep,
+      status: "completed"
+    });
     return finishConversation(conversation);
   }
 
-  await updateConversation(
-    conversation.conversationId,
-    {
-      currentStep: result.nextStep,
-      status: "waiting_answer"
-    }
-  );
+  await updateConversation(conversation.conversationId, {
+    currentStep: result.nextStep,
+    status: "waiting_answer"
+  });
 
   return sendCurrentStep({
     ...conversation,
