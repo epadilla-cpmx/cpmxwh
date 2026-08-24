@@ -129,6 +129,9 @@ router.post("/conversation/start", async (req, res) => {
           vacancyId:
             data.vacancy.id,
 
+          vacancyName:
+            data.vacancy.name,
+
           scriptId:
             data.scriptId
 
