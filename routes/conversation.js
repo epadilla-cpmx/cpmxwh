@@ -1,6 +1,9 @@
 const express = require("express");
 const router = express.Router();
 
+const { sendMessage } =
+  require("../services/evolution");
+
 const {
   getScript
 } = require("../services/scriptLoader");
@@ -136,6 +139,18 @@ router.post("/conversation/start", async (req, res) => {
             data.scriptId
 
         });
+
+        const evolutionResponse =
+  await sendMessage(
+    data.recruiterInstance,
+    candidate.phone,
+    conversation.greeting
+  );
+
+console.log(
+  "Mensaje enviado por Evolution:",
+  evolutionResponse
+);
 
 
       conversations.push(conversation);

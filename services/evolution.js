@@ -1,9 +1,9 @@
 const axios = require("axios");
 
-async function sendMessage(number, text) {
+async function sendMessage(instance, number, text) {
 
   const response = await axios.post(
-    `${process.env.EVOLUTION_URL}/message/sendText/${process.env.INSTANCE_NAME}`,
+    `${process.env.EVOLUTION_URL}/message/sendText/${instance}`,
     {
       number,
       text
