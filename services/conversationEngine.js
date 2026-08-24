@@ -16,6 +16,10 @@ const {
   updateConversation
 } = require("./conversationUpdater");
 
+const {
+  delay
+} = require("./delay");
+
 
 const auth = new google.auth.GoogleAuth({
 
@@ -39,6 +43,13 @@ const auth = new google.auth.GoogleAuth({
 const TARGET_SHEET_ID =
   process.env.TARGET_SHEET_ID;
 
+const QUESTION_DELAY_MS =
+  Number(
+    process.env.QUESTION_DELAY_MS ||
+    process.env.MESSAGE_DELAY_MS ||
+    30000
+  );
+
 
 // --------------------------------------------------
 // OBTENER GOOGLE SHEETS
@@ -47,11 +58,8 @@ const TARGET_SHEET_ID =
 function getSheetsClient() {
 
   return google.sheets({
-
     version: "v4",
-
     auth
-
   });
 
 }
@@ -67,8 +75,7 @@ async function saveAnswer(
   answer
 ) {
 
-  const sheets =
-    getSheetsClient();
+  const sheets = getSheetsClient();
 
   await sheets.spreadsheets.values.update({
 
@@ -82,11 +89,9 @@ async function saveAnswer(
       "RAW",
 
     requestBody: {
-
       values: [
         [answer]
       ]
-
     }
 
   });
@@ -135,7 +140,6 @@ async function sendCurrentStep(
     ];
 
 
-  // Ya no hay preguntas
   if (!step) {
 
     return finishConversation(
@@ -147,9 +151,7 @@ async function sendCurrentStep(
 
   const question =
     buildMessage(
-
       step.question,
-
       {
         candidateName:
           conversation.candidateName,
@@ -160,7 +162,6 @@ async function sendCurrentStep(
         recruiterName:
           conversation.recruiterName
       }
-
     );
 
 
@@ -170,16 +171,32 @@ async function sendCurrentStep(
   );
 
 
+  console.log(
+    `Esperando ${QUESTION_DELAY_MS} ms antes de enviar la pregunta...`
+  );
+
+  await delay(
+    QUESTION_DELAY_MS
+  );
+
+
   const response =
     await sendMessage(
-
       conversation.recruiterInstance,
-
       conversation.candidatePhone,
-
       question
-
     );
+
+
+  if (response?.sent === false) {
+
+    console.log(
+      "La pregunta no fue enviada:",
+      response.reason
+    );
+
+    return response;
+  }
 
 
   console.log(
@@ -189,14 +206,10 @@ async function sendCurrentStep(
 
 
   return {
-
     type: "question_sent",
-
     step:
       conversation.currentStep,
-
     question
-
   };
 
 }
@@ -215,12 +228,9 @@ async function finishConversation(
       conversation.scriptId
     );
 
-
   const goodbye =
     buildMessage(
-
       script.goodbye,
-
       {
         candidateName:
           conversation.candidateName,
@@ -231,32 +241,32 @@ async function finishConversation(
         recruiterName:
           conversation.recruiterName
       }
-
     );
-
 
   console.log(
     "Entrevista terminada."
   );
 
+  const response =
+    await sendMessage(
+      conversation.recruiterInstance,
+      conversation.candidatePhone,
+      goodbye
+    );
 
-  await sendMessage(
+  if (response?.sent === false) {
 
-    conversation.recruiterInstance,
+    console.log(
+      "El mensaje de despedida no fue enviado:",
+      response.reason
+    );
 
-    conversation.candidatePhone,
-
-    goodbye
-
-  );
-
+    return response;
+  }
 
   return {
-
     type: "completed",
-
     goodbye
-
   };
 
 }
@@ -276,7 +286,6 @@ async function processAnswer(
       conversation
     );
 
-
   if (!step) {
 
     return finishConversation(
@@ -285,38 +294,26 @@ async function processAnswer(
 
   }
 
-
   console.log(
     "Procesando respuesta para:",
     step.question
   );
 
-
   await saveAnswer(
-
     conversation,
-
     step,
-
     answer
-
   );
-
 
   const nextStep =
     conversation.currentStep + 1;
 
-
   return {
-
     type:
       "answer_processed",
-
     currentStep:
       conversation.currentStep,
-
     nextStep
-
   };
 
 }
@@ -337,16 +334,11 @@ async function advanceConversation(
       answer
     );
 
-
   const script =
     getScript(
       conversation.scriptId
     );
 
-
-  // ----------------------------------------------
-  // TERMINAR ENTREVISTA
-  // ----------------------------------------------
 
   if (
     result.nextStep >=
@@ -354,19 +346,14 @@ async function advanceConversation(
   ) {
 
     await updateConversation(
-
       conversation.conversationId,
-
       {
         currentStep:
           result.nextStep,
-
         status:
           "completed"
       }
-
     );
-
 
     return finishConversation(
       conversation
@@ -375,35 +362,23 @@ async function advanceConversation(
   }
 
 
-  // ----------------------------------------------
-  // AVANZAR AL SIGUIENTE PASO
-  // ----------------------------------------------
-
   await updateConversation(
-
     conversation.conversationId,
-
     {
       currentStep:
         result.nextStep,
-
       status:
         "waiting_answer"
     }
-
   );
 
 
   const nextConversation = {
-
     ...conversation,
-
     currentStep:
       result.nextStep,
-
     status:
       "waiting_answer"
-
   };
 
 
@@ -415,17 +390,10 @@ async function advanceConversation(
 
 
 module.exports = {
-
   saveAnswer,
-
   getStep,
-
   sendCurrentStep,
-
   processAnswer,
-
   advanceConversation,
-
   finishConversation
-
 };
