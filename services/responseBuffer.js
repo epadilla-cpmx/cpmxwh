@@ -9,7 +9,7 @@ const auth = new google.auth.GoogleAuth({
     client_email: process.env.GOOGLE_CLIENT_EMAIL,
     private_key: process.env.GOOGLE_PRIVATE_KEY.replace(/\\n/g, "\n")
   },
-  scopes: ["https://www.googleapis.com/auth/cloud-platform"]
+  scopes: ["https://www.googleapis.com/auth/spreadsheets"]
 });
 
 const TARGET_SHEET_ID = process.env.TARGET_SHEET_ID;
@@ -32,7 +32,11 @@ async function updateBufferState(conversation, values) {
   });
 }
 
-async function scheduleBufferProcessing(conversationId, recruiterInstance, lastMessageAt) {
+async function scheduleBufferProcessing(
+  conversationId,
+  recruiterInstance,
+  lastMessageAt
+) {
   const projectId = process.env.GOOGLE_CLOUD_PROJECT || process.env.GCP_PROJECT;
   const location = process.env.CLOUD_TASKS_LOCATION;
   const queue = process.env.CLOUD_TASKS_QUEUE;
@@ -66,9 +70,7 @@ async function scheduleBufferProcessing(conversationId, recruiterInstance, lastM
         httpRequest: {
           httpMethod: "POST",
           url: `${targetUrl.replace(/\/$/, "")}/internal/process-buffer`,
-          headers: {
-            "Content-Type": "application/json"
-          },
+          headers: { "Content-Type": "application/json" },
           body: payload,
           oidcToken: {
             serviceAccountEmail,
@@ -98,6 +100,8 @@ async function appendMessage(conversation, messageId, text) {
 
   const lastMessageAt = new Date().toISOString();
 
+  // Escribimos primero el nuevo estado. Las tareas antiguas solamente
+  // podrán procesarlo si todavía coincide con este lastMessageAt.
   await updateBufferState(conversation, {
     pendingResponse,
     lastMessageAt,
