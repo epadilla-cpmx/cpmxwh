@@ -9,7 +9,10 @@ const auth = new google.auth.GoogleAuth({
     client_email: process.env.GOOGLE_CLIENT_EMAIL,
     private_key: process.env.GOOGLE_PRIVATE_KEY.replace(/\\n/g, "\n")
   },
-  scopes: ["https://www.googleapis.com/auth/spreadsheets"]
+  scopes: [
+    "https://www.googleapis.com/auth/spreadsheets",
+    "https://www.googleapis.com/auth/cloud-tasks"
+  ]
 });
 
 const TARGET_SHEET_ID = process.env.TARGET_SHEET_ID;
@@ -89,8 +92,17 @@ async function scheduleBufferProcessing(
 async function appendMessage(conversation, messageId, text) {
   if (!text) return { added: false, reason: "empty_text" };
 
-  if (messageId && messageId === conversation.lastMessageId) {
-    console.log("Mensaje duplicado ignorado:", messageId);
+  // Si ya se guardó este mensaje pero la tarea anterior no llegó a crearse,
+  // permitimos volver a programarla. Solo ignoramos el mensaje si el buffer
+  // ya existe y una tarea fue creada correctamente en este ciclo.
+  const isDuplicate = messageId && messageId === conversation.lastMessageId;
+
+  if (isDuplicate && !conversation.lastMessageAt) {
+    return { added: false, reason: "duplicate_without_active_buffer" };
+  }
+
+  if (isDuplicate) {
+    console.log("Mensaje duplicado ya procesado:", messageId);
     return { added: false, reason: "duplicate" };
   }
 
@@ -100,8 +112,6 @@ async function appendMessage(conversation, messageId, text) {
 
   const lastMessageAt = new Date().toISOString();
 
-  // Escribimos primero el nuevo estado. Las tareas antiguas solamente
-  // podrán procesarlo si todavía coincide con este lastMessageAt.
   await updateBufferState(conversation, {
     pendingResponse,
     lastMessageAt,
