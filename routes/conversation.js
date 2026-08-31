@@ -2,10 +2,6 @@ const express = require("express");
 const router = express.Router();
 
 const {
-  delay
-} = require("../services/delay");
-
-const {
   getScript
 } = require("../services/scriptLoader");
 
@@ -73,8 +69,12 @@ router.post("/conversation/start", async (req, res) => {
         scriptId: data.scriptId
       });
 
+      // Se conserva el comportamiento anterior de 30 s entre candidatos,
+      // pero sin mantener abierto el request de Cloud Run durante la espera.
+      const scheduleDelayMs = INITIAL_MESSAGE_DELAY_MS * (i + 1);
+
       console.log(
-        `Encolando mensaje inicial con delay de ${INITIAL_MESSAGE_DELAY_MS} ms...`
+        `Encolando mensaje inicial para ${candidate.name}; programado en ${scheduleDelayMs} ms.`
       );
 
       await enqueueMessage(
@@ -86,12 +86,11 @@ router.post("/conversation/start", async (req, res) => {
         },
         conversation.greeting,
         {
-          scheduleDelayMs: INITIAL_MESSAGE_DELAY_MS
+          scheduleDelayMs
         }
       );
 
       conversations.push(conversation);
-
       console.log("Conversación creada:", conversation);
     }
 
