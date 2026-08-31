@@ -21,6 +21,15 @@ const PROJECT_ID =
   process.env.GOOGLE_CLOUD_PROJECT || process.env.GCP_PROJECT;
 const SERVICE_ACCOUNT_EMAIL = process.env.GOOGLE_CLIENT_EMAIL;
 
+const INTER_MESSAGE_MIN_MS = 2000;
+const INTER_MESSAGE_MAX_MS = 5000;
+
+function getRandomInterval() {
+  return Math.floor(
+    Math.random() * (INTER_MESSAGE_MAX_MS - INTER_MESSAGE_MIN_MS + 1)
+  ) + INTER_MESSAGE_MIN_MS;
+}
+
 function validateConfig() {
   const missing = [];
   if (!PROJECT_ID) missing.push("GOOGLE_CLOUD_PROJECT");
@@ -39,15 +48,12 @@ async function enqueueMessage(conversation, text, options = {}) {
   if (!conversation?.conversationId) {
     throw new Error("Falta conversationId para encolar mensaje.");
   }
-
   if (!conversation?.recruiterInstance) {
     throw new Error("Falta recruiterInstance para encolar mensaje.");
   }
-
   if (!conversation?.candidatePhone) {
     throw new Error("Falta candidatePhone para encolar mensaje.");
   }
-
   if (!text) {
     throw new Error("No se puede encolar un mensaje vacío.");
   }
@@ -102,8 +108,6 @@ async function enqueueMessage(conversation, text, options = {}) {
       data: { task }
     });
   } catch (error) {
-    // Si Cloud Tasks rechaza la tarea, no dejamos la conversación marcada
-    // como pendiente de envío indefinidamente.
     await updateConversation(conversation.conversationId, {
       sendQueuedAt: ""
     });
@@ -115,6 +119,36 @@ async function enqueueMessage(conversation, text, options = {}) {
   );
 
   return { queued: true, queuedAt };
+}
+
+async function getMotorRows() {
+  const sheets = google.sheets({ version: "v4", auth });
+  const spreadsheetId = process.env.TARGET_SHEET_ID;
+  const response = await sheets.spreadsheets.values.get({
+    spreadsheetId,
+    range: "Motor!A:S"
+  });
+  return response.data.values || [];
+}
+
+function isTrue(value) {
+  return value === true || String(value).toLowerCase() === "true";
+}
+
+function getQueuedForInstance(rows, instance) {
+  return rows
+    .map((row, index) => ({ row, index }))
+    .filter(({ row }) =>
+      row[1] === instance &&
+      row[0] &&
+      row[18]
+    )
+    .sort((a, b) => {
+      const timeA = new Date(a.row[18]).getTime();
+      const timeB = new Date(b.row[18]).getTime();
+      if (timeA !== timeB) return timeA - timeB;
+      return String(a.row[0]).localeCompare(String(b.row[0]));
+    });
 }
 
 async function processSenderTask(payload) {
@@ -133,33 +167,77 @@ async function processSenderTask(payload) {
     );
   }
 
-  console.log(
-    `Procesando envío de ${conversationId} mediante instancia ${recruiterInstance}`
-  );
+  const rows = await getMotorRows();
+  const queued = getQueuedForInstance(rows, recruiterInstance);
+  const current = queued.find(({ row }) => row[0] === conversationId);
 
-  const result = await sendMessage(
-    recruiterInstance,
-    candidatePhone,
-    text,
-    {
-      delayMs: delayMs || undefined,
-      presence: presence || undefined
+  if (!current) {
+    console.log(`Tarea ${conversationId} ya no tiene un envío pendiente.`);
+    return { sent: false, skipped: true, reason: "not_pending" };
+  }
+
+  const currentSending = isTrue(current.row[17]);
+  if (currentSending) {
+    const error = new Error(`La instancia ${recruiterInstance} está ocupada.`);
+    error.code = "INSTANCE_BUSY";
+    throw error;
+  }
+
+  const next = queued[0];
+  if (next.row[0] !== conversationId) {
+    const error = new Error(
+      `La instancia ${recruiterInstance} tiene otro mensaje pendiente antes de ${conversationId}.`
+    );
+    error.code = "QUEUE_TURN_NOT_READY";
+    throw error;
+  }
+
+  // El mensaje más antiguo de la instancia toma el turno antes de llamar a Evolution.
+  await updateConversation(conversationId, {
+    sending: true
+  });
+
+  try {
+    console.log(
+      `Enviando ${conversationId} mediante ${recruiterInstance}. Typing: ${delayMs || "sin delay"} ms.`
+    );
+
+    const result = await sendMessage(
+      recruiterInstance,
+      candidatePhone,
+      text,
+      {
+        delayMs: delayMs || undefined,
+        presence: presence || undefined
+      }
+    );
+
+    if (!result?.sent) {
+      throw new Error(
+        `Evolution no confirmó el envío de ${conversationId}: ${result?.reason || "unknown"}`
+      );
     }
-  );
 
-  if (result?.sent) {
+    const intervalMs = getRandomInterval();
+    console.log(
+      `Intervalo de ${intervalMs} ms antes de liberar la instancia ${recruiterInstance}.`
+    );
+    await new Promise(resolve => setTimeout(resolve, intervalMs));
+
     await updateConversation(conversationId, {
       sending: false,
       sendQueuedAt: ""
     });
+
+    console.log(`Envío completado para ${conversationId}.`);
+    return result;
+  } catch (error) {
+    // Conservamos sendQueuedAt para que Cloud Tasks pueda reintentar la tarea.
+    await updateConversation(conversationId, {
+      sending: false
+    });
+    throw error;
   }
-
-  console.log(
-    `Envío procesado para ${conversationId}:`,
-    result
-  );
-
-  return result;
 }
 
 module.exports = {
