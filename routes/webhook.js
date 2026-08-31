@@ -29,15 +29,16 @@ async function handler(req, res) {
     const text = message?.conversation || message?.extendedTextMessage?.text || "";
     if (!text) return res.sendStatus(200);
 
-    await markMessageAsRead(data.instance, remoteJid, messageId);
-
     const candidatePhone = remoteJid.replace("@s.whatsapp.net", "");
     const conversation = await findConversation(data.instance, candidatePhone);
 
     if (!conversation) {
-      console.log("No se encontró una conversación activa.");
+      console.log("No se encontró una conversación activa. Mensaje ignorado sin marcar como leído.");
       return res.sendStatus(200);
     }
+
+    // Solo marcamos como leído después de confirmar que existe una entrevista activa.
+    await markMessageAsRead(data.instance, remoteJid, messageId);
 
     if (conversation.status === "waiting_start") {
       const consent = getConsentResult(text);
