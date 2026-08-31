@@ -17,6 +17,15 @@ const MESSAGE_DELAY_MS = Number(
   process.env.MESSAGE_DELAY_MS || process.env.QUESTION_DELAY_MS || 5000
 );
 
+const TYPING_MIN_MS = 9000;
+const TYPING_MAX_MS = 15000;
+
+function getRandomTypingDelay() {
+  return Math.floor(
+    Math.random() * (TYPING_MAX_MS - TYPING_MIN_MS + 1)
+  ) + TYPING_MIN_MS;
+}
+
 function getSheetsClient() {
   return google.sheets({ version: "v4", auth });
 }
@@ -49,14 +58,16 @@ async function sendCurrentStep(conversation) {
     recruiterName: conversation.recruiterName
   });
 
-  console.log(`Enviando pregunta con typing durante ${MESSAGE_DELAY_MS} ms...`);
+  const typingDelayMs = getRandomTypingDelay();
+
+  console.log(`Enviando pregunta con typing durante ${typingDelayMs} ms...`);
 
   const response = await sendMessage(
     conversation.recruiterInstance,
     conversation.candidatePhone,
     question,
     {
-      delayMs: MESSAGE_DELAY_MS,
+      delayMs: typingDelayMs,
       presence: "composing"
     }
   );
