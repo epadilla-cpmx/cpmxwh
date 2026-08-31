@@ -1,7 +1,7 @@
 const { google } = require("googleapis");
 const { getScript } = require("./scriptLoader");
 const { buildMessage } = require("./messageBuilder");
-const { sendMessage } = require("./evolution");
+const { enqueueMessage } = require("./messageQueue");
 const { updateConversation } = require("./conversationUpdater");
 
 const auth = new google.auth.GoogleAuth({
@@ -13,10 +13,6 @@ const auth = new google.auth.GoogleAuth({
 });
 
 const TARGET_SHEET_ID = process.env.TARGET_SHEET_ID;
-const MESSAGE_DELAY_MS = Number(
-  process.env.MESSAGE_DELAY_MS || process.env.QUESTION_DELAY_MS || 5000
-);
-
 const TYPING_MIN_MS = 9000;
 const TYPING_MAX_MS = 15000;
 
@@ -60,11 +56,10 @@ async function sendCurrentStep(conversation) {
 
   const typingDelayMs = getRandomTypingDelay();
 
-  console.log(`Enviando pregunta con typing durante ${typingDelayMs} ms...`);
+  console.log(`Encolando pregunta con typing durante ${typingDelayMs} ms...`);
 
-  const response = await sendMessage(
-    conversation.recruiterInstance,
-    conversation.candidatePhone,
+  await enqueueMessage(
+    conversation,
     question,
     {
       delayMs: typingDelayMs,
@@ -72,10 +67,8 @@ async function sendCurrentStep(conversation) {
     }
   );
 
-  console.log("Respuesta de Evolution:", response);
-
   return {
-    type: "question_sent",
+    type: "question_queued",
     step: conversation.currentStep,
     question
   };
@@ -89,11 +82,10 @@ async function finishConversation(conversation) {
     recruiterName: conversation.recruiterName
   });
 
-  console.log("Entrevista terminada.");
+  console.log("Entrevista terminada. Encolando mensaje final.");
 
-  await sendMessage(
-    conversation.recruiterInstance,
-    conversation.candidatePhone,
+  await enqueueMessage(
+    conversation,
     goodbye
   );
 
