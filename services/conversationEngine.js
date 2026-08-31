@@ -82,11 +82,19 @@ async function finishConversation(conversation) {
     recruiterName: conversation.recruiterName
   });
 
-  console.log("Entrevista terminada. Encolando mensaje final.");
+  const typingDelayMs = getRandomTypingDelay();
+
+  console.log(
+    `Entrevista terminada. Encolando despedida con typing de ${typingDelayMs} ms...`
+  );
 
   await enqueueMessage(
     conversation,
-    goodbye
+    goodbye,
+    {
+      delayMs: typingDelayMs,
+      presence: "composing"
+    }
   );
 
   return { type: "completed", goodbye };
