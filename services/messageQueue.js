@@ -158,12 +158,13 @@ async function processSenderTask(payload) {
     candidatePhone,
     text,
     presence,
-    delayMs
+    delayMs,
+    queuedAt
   } = payload || {};
 
-  if (!conversationId || !recruiterInstance || !candidatePhone || !text) {
+  if (!conversationId || !recruiterInstance || !candidatePhone || !text || !queuedAt) {
     throw new Error(
-      "conversationId, recruiterInstance, candidatePhone y text son requeridos"
+      "conversationId, recruiterInstance, candidatePhone, text y queuedAt son requeridos"
     );
   }
 
@@ -174,6 +175,13 @@ async function processSenderTask(payload) {
   if (!current) {
     console.log(`Tarea ${conversationId} ya no tiene un envío pendiente.`);
     return { sent: false, skipped: true, reason: "not_pending" };
+  }
+
+  // Evita que una tarea antigua pueda enviar el contenido de una tarea posterior
+  // que reemplazó el estado de salida de la conversación.
+  if (String(current.row[18]) !== String(queuedAt)) {
+    console.log(`Tarea antigua ignorada para ${conversationId}.`);
+    return { sent: false, skipped: true, reason: "stale_task" };
   }
 
   const currentSending = isTrue(current.row[17]);
