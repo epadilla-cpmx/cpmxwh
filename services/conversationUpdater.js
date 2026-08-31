@@ -15,7 +15,7 @@ async function updateConversation(conversationId, updates) {
 
   const response = await sheets.spreadsheets.values.get({
     spreadsheetId: TARGET_SHEET_ID,
-    range: "Motor!A:Q"
+    range: "Motor!A:S"
   });
 
   const rows = response.data.values || [];
@@ -37,12 +37,14 @@ async function updateConversation(conversationId, updates) {
     updates.pendingResponse ?? currentRow[13] ?? "",
     updates.lastMessageAt ?? currentRow[14] ?? "",
     updates.processing ?? currentRow[15] ?? false,
-    updates.lastMessageId ?? currentRow[16] ?? ""
+    updates.lastMessageId ?? currentRow[16] ?? "",
+    updates.sending ?? currentRow[17] ?? false,
+    updates.sendQueuedAt ?? currentRow[18] ?? ""
   ];
 
   await sheets.spreadsheets.values.update({
     spreadsheetId: TARGET_SHEET_ID,
-    range: `Motor!A${sheetRow}:Q${sheetRow}`,
+    range: `Motor!A${sheetRow}:S${sheetRow}`,
     valueInputOption: "RAW",
     requestBody: { values: [newRow] }
   });
@@ -56,7 +58,9 @@ async function updateConversation(conversationId, updates) {
     createdAt: newRow[11], updatedAt: newRow[12],
     pendingResponse: newRow[13] || "", lastMessageAt: newRow[14] || "",
     processing: String(newRow[15]).toLowerCase() === "true",
-    lastMessageId: newRow[16] || ""
+    lastMessageId: newRow[16] || "",
+    sending: String(newRow[17]).toLowerCase() === "true",
+    sendQueuedAt: newRow[18] || ""
   };
 }
 
