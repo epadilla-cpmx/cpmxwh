@@ -8,6 +8,7 @@ const { sendCurrentStep } = require("../services/conversationEngine");
 const { markMessageAsRead } = require("../services/evolution");
 const { appendMessage } = require("../services/responseBuffer");
 const { processConversationBuffer } = require("../services/responseProcessor");
+const { processSenderTask } = require("../services/messageQueue");
 
 async function handler(req, res) {
   try {
@@ -37,7 +38,6 @@ async function handler(req, res) {
       return res.sendStatus(200);
     }
 
-    // Solo marcamos como leído después de confirmar que existe una entrevista activa.
     await markMessageAsRead(data.instance, remoteJid, messageId);
 
     if (conversation.status === "waiting_start") {
@@ -98,8 +98,19 @@ async function processBufferHandler(req, res) {
   }
 }
 
+async function processSenderHandler(req, res) {
+  try {
+    const result = await processSenderTask(req.body || {});
+    return res.status(200).json(result);
+  } catch (error) {
+    console.error("Error procesando sender task:", error);
+    return res.status(500).json({ error: error.message });
+  }
+}
+
 router.post("/webhook", handler);
 router.post("/webhook/messages-upsert", handler);
 router.post("/internal/process-buffer", processBufferHandler);
+router.post("/internal/process-sender", processSenderHandler);
 
 module.exports = router;
