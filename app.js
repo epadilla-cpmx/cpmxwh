@@ -6,6 +6,7 @@ const testRoute = require("./routes/test");
 const webhookRoute = require("./routes/webhook");
 const conversationRoute = require("./routes/conversation");
 const internalSenderRoute = require("./routes/internalSender");
+const commercialRoute = require("./routes/commercial");
 
 const app = express();
 
@@ -27,6 +28,7 @@ app.use("/", testRoute);
 app.use("/", webhookRoute);
 app.use("/", conversationRoute);
 app.use("/", internalSenderRoute);
+app.use("/", commercialRoute);
 
 const PORT = process.env.PORT || 8080;
 
