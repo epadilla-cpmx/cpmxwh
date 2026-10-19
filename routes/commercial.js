@@ -1,7 +1,7 @@
 const express = require("express");
 const crypto = require("crypto");
 const router = express.Router();
-const { enqueueCommercialProspects } = require("../services/commercialProspecting");
+const { enqueueCommercialProspects, processCommercialTask } = require("../services/commercialProspecting");
 
 function timingSafeEqualString(a, b) {
   const left = Buffer.from(String(a || ""));
@@ -11,13 +11,11 @@ function timingSafeEqualString(a, b) {
 
 router.post("/commercial/prospect", async (req, res) => {
   const expectedKey = process.env.COMMERCIAL_API_KEY;
-  const suppliedKey = req.get("x-commercial-api-key");
-
   if (!expectedKey) {
     console.error("COMMERCIAL_API_KEY no está configurada.");
     return res.status(503).json({ success: false, error: "Módulo comercial no configurado." });
   }
-  if (!timingSafeEqualString(suppliedKey, expectedKey)) {
+  if (!timingSafeEqualString(req.get("x-commercial-api-key"), expectedKey)) {
     return res.status(401).json({ success: false, error: "No autorizado." });
   }
 
@@ -34,8 +32,11 @@ router.post("/commercial/prospect", async (req, res) => {
 });
 
 router.post("/internal/commercial-send", async (req, res) => {
+  const expectedKey = process.env.COMMERCIAL_TASK_KEY;
+  if (!expectedKey || !timingSafeEqualString(req.get("x-commercial-task-key"), expectedKey)) {
+    return res.status(401).json({ success: false, error: "Tarea no autorizada." });
+  }
   try {
-    const { processCommercialTask } = require("../services/commercialProspecting");
     const result = await processCommercialTask(req.body || {});
     return res.status(200).json({ success: true, ...result });
   } catch (error) {
