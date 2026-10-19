@@ -19,15 +19,20 @@ const QUEUE_LOCATION = process.env.SENDER_QUEUE_LOCATION || process.env.CLOUD_TA
 const PROJECT_ID = process.env.GOOGLE_CLOUD_PROJECT || process.env.GCP_PROJECT;
 const CLOUD_RUN_URL = process.env.CLOUD_RUN_URL;
 const SERVICE_ACCOUNT_EMAIL = process.env.GOOGLE_CLIENT_EMAIL;
-const INSTANCE = process.env.COMMERCIAL_EVOLUTION_INSTANCE || "comercial";
+const INSTANCE = process.env.COMMERCIAL_EVOLUTION_INSTANCE || "Erick2";
 const TASK_KEY = process.env.COMMERCIAL_TASK_KEY;
 const MIN_DELAY_MS = 2 * 60 * 1000;
 const MAX_DELAY_MS = 5 * 60 * 1000;
 const MAX_BATCH_SIZE = 10;
+const MIN_TYPING_DELAY_MS = 9000;
+const MAX_TYPING_DELAY_MS = 15000;
 const TZ = "America/Monterrey";
 
 function randomDelayMs() {
   return Math.floor(Math.random() * (MAX_DELAY_MS - MIN_DELAY_MS + 1)) + MIN_DELAY_MS;
+}
+function randomTypingDelayMs() {
+  return Math.floor(Math.random() * (MAX_TYPING_DELAY_MS - MIN_TYPING_DELAY_MS + 1)) + MIN_TYPING_DELAY_MS;
 }
 function localHour() {
   return Number(new Intl.DateTimeFormat("en-US", { timeZone: TZ, hour: "2-digit", hourCycle: "h23" }).format(new Date()));
@@ -65,10 +70,16 @@ function validateSheetData(data) {
   if (data.contacts.length > MAX_BATCH_SIZE) {
     const error = new Error("El lote máximo inicial es de 10 contactos."); error.statusCode = 400; error.publicMessage = error.message; throw error;
   }
+  const seenRows = new Set();
   for (const c of data.contacts) {
-    if (!Number.isInteger(Number(c.rowNumber)) || Number(c.rowNumber) < 2 || !c.company || !c.contact || !c.phone) {
+    const rowNumber = Number(c.rowNumber);
+    if (!Number.isInteger(rowNumber) || rowNumber < 2 || !c.company || !c.contact || !c.phone) {
       const error = new Error("Cada contacto requiere fila, empresa, contacto y teléfono."); error.statusCode = 400; error.publicMessage = error.message; throw error;
     }
+    if (seenRows.has(rowNumber)) {
+      const error = new Error("La fila " + rowNumber + " aparece más de una vez."); error.statusCode = 400; error.publicMessage = error.message; throw error;
+    }
+    seenRows.add(rowNumber);
   }
 }
 
@@ -124,22 +135,26 @@ async function enqueueCommercialProspects(data) {
   const sheets = getSheetsClient();
   const client = await getQueueClient();
   const queuePath = `projects/${PROJECT_ID}/locations/${QUEUE_LOCATION}/queues/${QUEUE}`;
-  const tasks = [];
-  let cumulativeDelayMs = 1000;
-
+  // Validar todas las filas antes de crear la primera tarea para evitar lotes parciales por estados existentes.
   for (const contact of data.contacts) {
     const rowNumber = Number(contact.rowNumber);
     const current = await sheets.spreadsheets.values.get({
       spreadsheetId: data.spreadsheetId,
       range: escapedSheet(data.sheetName) + "!I" + rowNumber + ":I" + rowNumber
     });
-    const status = current.data.values?.[0]?.[0] || "";
+    const status = String(current.data.values?.[0]?.[0] || "").trim().toUpperCase();
     if (["EN COLA", "ENVIANDO", "ENVIADO"].includes(status)) {
       throw Object.assign(new Error("La fila " + rowNumber + " ya está procesada o en cola."), {
         statusCode: 409, publicMessage: "La fila " + rowNumber + " ya está procesada o en cola."
       });
     }
+  }
 
+  const tasks = [];
+  let cumulativeDelayMs = 1000;
+
+  for (const contact of data.contacts) {
+    const rowNumber = Number(contact.rowNumber);
     if (tasks.length > 0) cumulativeDelayMs += randomDelayMs();
     const scheduledAt = new Date(Date.now() + cumulativeDelayMs);
     const payload = {
@@ -206,7 +221,10 @@ async function processCommercialTask(payload) {
     .replaceAll("{company}", company);
 
   try {
-    const result = await sendMessage(instance, phone, message);
+    const result = await sendMessage(instance, phone, message, {
+      presence: "composing",
+      delayMs: randomTypingDelayMs()
+    });
     if (!result?.sent) {
       await updateTracking(spreadsheetId, sheetName, rowNumber, {
         status: "ERROR", error: result?.reason || "Evolution no confirmó el envío."
@@ -217,10 +235,15 @@ async function processCommercialTask(payload) {
     await updateTracking(spreadsheetId, sheetName, rowNumber, { date: sentAt, status: "ENVIADO", error: "" });
     return { sent: true, rowNumber, sentAt };
   } catch (error) {
-    await updateTracking(spreadsheetId, sheetName, rowNumber, {
-      status: "ERROR", error: String(error.message || "Error de envío").slice(0, 450)
-    });
-    throw error;
+    // No lanzar el error después de intentar enviar: un reintento automático podría duplicar el WhatsApp.
+    try {
+      await updateTracking(spreadsheetId, sheetName, rowNumber, {
+        status: "ERROR: VERIFICAR", error: String(error.message || "Resultado de envío incierto; verificar antes de reintentar.").slice(0, 450)
+      });
+    } catch (trackingError) {
+      console.error("No se pudo actualizar el seguimiento; la fila puede permanecer ENVIANDO:", trackingError.message);
+    }
+    return { sent: false, rowNumber, reason: "send_result_needs_manual_verification" };
   }
 }
 
