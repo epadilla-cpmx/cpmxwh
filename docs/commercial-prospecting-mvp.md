@@ -19,7 +19,7 @@ El backend agrega:
 - I Estado de envío
 - J Error de envío
 
-Estados principales: `EN COLA`, `ENVIANDO`, `ENVIADO`, `ERROR` y `PENDIENTE: FUERA DE HORARIO`.
+Estados principales: `EN COLA`, `ENVIANDO`, `ENVIADO`, `ERROR`, `ERROR: VERIFICAR` y `PENDIENTE: FUERA DE HORARIO`. Los estados `ERROR: VERIFICAR` requieren revisión manual antes de reintentar.
 
 ## Variables de entorno de Cloud Run
 
