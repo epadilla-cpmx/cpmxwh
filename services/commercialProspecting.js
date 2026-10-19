@@ -166,7 +166,7 @@ async function enqueueCommercialProspects(data) {
       contact: String(contact.contact).trim(),
       phone: String(contact.phone).trim(),
       instance: INSTANCE,
-      messageTemplate: String(contact.contact || "").trim() ? "Hola! buenos días disculpa es {contact} de {company}? le escribe Erick Padilla de Coparmex NL" : 'Hola! buenos días disculpa es "{company}"? le escribe Erick Padilla de Coparmex NL'
+      messageTemplate: String(contact.contact || "").trim() ? "Hola! buenos días disculpa es {contact} de {company}? le escribe Erick Padilla de Coparmex NL" : "Hola! buenos días disculpa es {company}? le escribe Erick Padilla de Coparmex NL"
     };
     const task = {
       httpRequest: {
