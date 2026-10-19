@@ -10,15 +10,6 @@ function timingSafeEqualString(a, b) {
 }
 
 router.post("/commercial/prospect", async (req, res) => {
-  const expectedKey = process.env.COMMERCIAL_API_KEY;
-  if (!expectedKey) {
-    console.error("COMMERCIAL_API_KEY no está configurada.");
-    return res.status(503).json({ success: false, error: "Módulo comercial no configurado." });
-  }
-  if (!timingSafeEqualString(req.get("x-commercial-api-key"), expectedKey)) {
-    return res.status(401).json({ success: false, error: "No autorizado." });
-  }
-
   try {
     const result = await enqueueCommercialProspects(req.body || {});
     return res.status(202).json({ success: true, ...result });
