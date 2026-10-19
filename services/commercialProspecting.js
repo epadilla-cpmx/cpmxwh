@@ -143,7 +143,7 @@ async function enqueueCommercialProspects(data) {
       range: escapedSheet(data.sheetName) + "!I" + rowNumber + ":I" + rowNumber
     });
     const status = String(current.data.values?.[0]?.[0] || "").trim().toUpperCase();
-    if (["EN COLA", "ENVIANDO", "ENVIADO"].includes(status)) {
+    if (["EN COLA", "ENVIANDO", "ENVIADO"].includes(status) || status.startsWith("ERROR: VERIFICAR")) {
       throw Object.assign(new Error("La fila " + rowNumber + " ya está procesada o en cola."), {
         statusCode: 409, publicMessage: "La fila " + rowNumber + " ya está procesada o en cola."
       });
