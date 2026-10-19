@@ -1,94 +1,135 @@
 /**
- * Apps Script para prospección manual desde filas seleccionadas.
- * Propiedades del script:
- * COMMERCIAL_API_URL = URL base de Cloud Run
- * COMMERCIAL_API_KEY = valor de COMMERCIAL_API_KEY configurado en Cloud Run
- *
- * Columnas de origen: A Empresa, B estado, C contacto, D correo,
- * E telefono, F seguimiento, G ultima respuesta.
- * El backend crea H:J para fecha, estado de envío y errores.
+ * Prospección comercial por WhatsApp desde filas seleccionadas.
+ * Columnas: A Empresa, C contacto, E telefono.
+ * Seguimiento: H fecha, I estado de envío, J error.
  */
+const COMMERCIAL_SHEET_NAME = "seguimiento 1";
 const COMMERCIAL_MAX_BATCH = 10;
+const COMMERCIAL_CLOUD_RUN_URL =
+  "https://cpmxwh-417317824044.northamerica-south1.run.app";
+
 function onOpen() {
-  SpreadsheetApp.getUi().createMenu("Prospección WhatsApp")
-    .addItem("Enviar a filas seleccionadas", "sendSelectedCommercialProspects")
+  SpreadsheetApp.getUi()
+    .createMenu("Aplicaciones")
+    .addItem("Mandar mensajes por WhatsApp", "mandarMensajesWhatsApp")
     .addToUi();
 }
 
-function sendSelectedCommercialProspects() {
+function mandarMensajesWhatsApp() {
   const ui = SpreadsheetApp.getUi();
-  const sheet = SpreadsheetApp.getActiveSheet();
-  const selected = sheet.getActiveRange();
-  if (!selected || selected.getRow() < 2) {
-    ui.alert("Selecciona las filas de empresas sin incluir el encabezado.");
-    return;
-  }
-  if (selected.getNumRows() > COMMERCIAL_MAX_BATCH) {
-    ui.alert("El lote inicial permite un máximo de 10 filas.");
+  const spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = spreadsheet.getActiveSheet();
+
+  if (sheet.getName() !== COMMERCIAL_SHEET_NAME) {
+    ui.alert('Abre la pestaña "' + COMMERCIAL_SHEET_NAME + '" y selecciona las filas.');
     return;
   }
 
-  const properties = PropertiesService.getScriptProperties();
-  const apiUrl = (properties.getProperty("COMMERCIAL_API_URL") || "").replace(/\/$/, "");
-  const apiKey = properties.getProperty("COMMERCIAL_API_KEY");
-  if (!apiUrl || !apiKey) {
-    ui.alert("Faltan COMMERCIAL_API_URL o COMMERCIAL_API_KEY en las propiedades del script.");
+  const rangeList = sheet.getActiveRangeList();
+  if (!rangeList) {
+    ui.alert("Selecciona las filas de las empresas que deseas contactar.");
     return;
   }
 
-  // Lee siempre A:G aunque el usuario haya seleccionado solo una celda de cada fila.
-  const firstRow = selected.getRow();
-  const rowCount = selected.getNumRows();
-  const values = sheet.getRange(firstRow, 1, rowCount, 7).getDisplayValues();
+  const selectedRows = new Set();
+  rangeList.getRanges().forEach(range => {
+    const firstRow = range.getRow();
+    const lastRow = firstRow + range.getNumRows() - 1;
+    for (let row = firstRow; row <= lastRow; row++) {
+      if (row >= 2) selectedRows.add(row);
+    }
+  });
+
+  const rows = [...selectedRows].sort((a, b) => a - b);
+  if (rows.length === 0) {
+    ui.alert("Selecciona filas de empresas, sin incluir el encabezado.");
+    return;
+  }
+  if (rows.length > COMMERCIAL_MAX_BATCH) {
+    ui.alert("El lote máximo permitido es de 10 filas.");
+    return;
+  }
+
   const contacts = [];
   const skipped = [];
 
-  values.forEach((row, offset) => {
-    const rowNumber = firstRow + offset;
+  rows.forEach(rowNumber => {
+    const row = sheet.getRange(rowNumber, 1, 1, 10).getDisplayValues()[0];
     const company = String(row[0] || "").trim();
     const contact = String(row[2] || "").trim();
     const phone = String(row[4] || "").trim();
-    const status = String(sheet.getRange(rowNumber, 9).getDisplayValue() || "").trim();
+    const status = String(row[8] || "").trim().toUpperCase();
+
     if (!company || !contact || !phone) {
       skipped.push("Fila " + rowNumber + ": faltan empresa, contacto o teléfono.");
       return;
     }
-    if (["ENVIADO", "ENVIANDO", "EN COLA"].includes(status)) {
+    if (["EN COLA", "ENVIANDO", "ENVIADO"].includes(status)) {
       skipped.push("Fila " + rowNumber + ": ya está " + status + ".");
       return;
     }
+
     contacts.push({ rowNumber, company, contact, phone });
   });
 
-  if (skipped.length && ui.alert("Filas omitidas", skipped.join("\n") + "\n\n¿Continuar con las filas válidas?", ui.ButtonSet.YES_NO) !== ui.Button.YES) return;
-  if (!contacts.length) {
-    ui.alert("No hay filas válidas nuevas para enviar.");
+  if (skipped.length > 0) {
+    const choice = ui.alert(
+      "Filas omitidas",
+      skipped.join("\n") + "\n\n¿Continuar con las filas válidas?",
+      ui.ButtonSet.YES_NO
+    );
+    if (choice !== ui.Button.YES) return;
+  }
+
+  if (contacts.length === 0) {
+    ui.alert("No hay contactos válidos nuevos para enviar.");
     return;
   }
-  if (ui.alert("Confirmar prospección", "Se pondrán en cola " + contacts.length + " mensajes desde la instancia comercial. ¿Continuar?", ui.ButtonSet.YES_NO) !== ui.Button.YES) return;
+
+  const confirmation = ui.alert(
+    "Confirmar envío",
+    "Se pondrán en cola " + contacts.length +
+      " mensajes mediante la instancia Erick2.\n\n" +
+      "Horario: 08:00 a 20:00, hora de Monterrey.\n" +
+      "¿Deseas continuar?",
+    ui.ButtonSet.YES_NO
+  );
+  if (confirmation !== ui.Button.YES) return;
 
   const payload = {
-    spreadsheetId: sheet.getParent().getId(),
+    spreadsheetId: spreadsheet.getId(),
     sheetName: sheet.getName(),
     contacts
   };
+
   try {
-    const response = UrlFetchApp.fetch(apiUrl + "/commercial/prospect", {
-      method: "post",
-      contentType: "application/json",
-      headers: { "x-commercial-api-key": apiKey },
-      payload: JSON.stringify(payload),
-      muteHttpExceptions: true
-    });
+    const response = UrlFetchApp.fetch(
+      COMMERCIAL_CLOUD_RUN_URL + "/commercial/prospect",
+      {
+        method: "post",
+        contentType: "application/json",
+        payload: JSON.stringify(payload),
+        muteHttpExceptions: true
+      }
+    );
+
     const code = response.getResponseCode();
     const body = response.getContentText();
+    console.log("Código HTTP: " + code);
+    console.log("Respuesta Cloud Run: " + body);
+
     if (code < 200 || code >= 300) {
-      ui.alert("Cloud Run rechazó la solicitud (" + code + "):\n" + body);
+      ui.alert("Cloud Run respondió con un error (" + code + "):\n\n" + body);
       return;
     }
+
     const result = JSON.parse(body);
-    ui.alert("Mensajes puestos en cola: " + result.queued + "\nInstancia: " + result.instance);
+    ui.alert(
+      "Solicitud enviada correctamente.\n\n" +
+      "Mensajes puestos en cola: " + result.queued + "\n" +
+      "Instancia: " + result.instance
+    );
   } catch (error) {
-    ui.alert("No se pudo contactar Cloud Run: " + error.message);
+    ui.alert("Error al contactar Cloud Run:\n" + error.message);
   }
 }
