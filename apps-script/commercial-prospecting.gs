@@ -64,7 +64,7 @@ function mandarMensajesWhatsApp() {
       skipped.push("Fila " + rowNumber + ": faltan empresa, contacto o teléfono.");
       return;
     }
-    if (["EN COLA", "ENVIANDO", "ENVIADO"].includes(status)) {
+    if (["EN COLA", "ENVIANDO", "ENVIADO"].includes(status) || status.startsWith("ERROR: VERIFICAR")) {
       skipped.push("Fila " + rowNumber + ": ya está " + status + ".");
       return;
     }
