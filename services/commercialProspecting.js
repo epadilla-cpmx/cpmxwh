@@ -73,8 +73,8 @@ function validateSheetData(data) {
   const seenRows = new Set();
   for (const c of data.contacts) {
     const rowNumber = Number(c.rowNumber);
-    if (!Number.isInteger(rowNumber) || rowNumber < 2 || !c.company || !c.contact || !c.phone) {
-      const error = new Error("Cada contacto requiere fila, empresa, contacto y teléfono."); error.statusCode = 400; error.publicMessage = error.message; throw error;
+    if (!Number.isInteger(rowNumber) || rowNumber < 2 || !String(c.company || "").trim() || !String(c.phone || "").trim()) {
+      const error = new Error("Cada contacto requiere fila, empresa y teléfono. El nombre del contacto es opcional."); error.statusCode = 400; error.publicMessage = error.message; throw error;
     }
     if (seenRows.has(rowNumber)) {
       const error = new Error("La fila " + rowNumber + " aparece más de una vez."); error.statusCode = 400; error.publicMessage = error.message; throw error;
@@ -166,7 +166,7 @@ async function enqueueCommercialProspects(data) {
       contact: String(contact.contact).trim(),
       phone: String(contact.phone).trim(),
       instance: INSTANCE,
-      messageTemplate: "Hola! buenos días disculpa es {contact} de {company}? le escribe Erick Padilla de Coparmex NL"
+      messageTemplate: String(contact.contact || "").trim() ? "Hola! buenos días disculpa es {contact} de {company}? le escribe Erick Padilla de Coparmex NL" : 'Hola! buenos días disculpa es "{company}"? le escribe Erick Padilla de Coparmex NL'
     };
     const task = {
       httpRequest: {
@@ -195,7 +195,7 @@ async function enqueueCommercialProspects(data) {
 
 async function processCommercialTask(payload) {
   const { spreadsheetId, sheetName, rowNumber, company, contact, phone, instance, messageTemplate, taskId } = payload;
-  if (!spreadsheetId || !sheetName || !rowNumber || !company || !contact || !phone || !instance || !taskId) {
+  if (!spreadsheetId || !sheetName || !rowNumber || !company || !phone || !instance || !taskId) {
     throw new Error("Payload de tarea comercial incompleto.");
   }
   const sheets = getSheetsClient();
@@ -217,7 +217,7 @@ async function processCommercialTask(payload) {
 
   await updateTracking(spreadsheetId, sheetName, rowNumber, { status: "ENVIANDO", error: "" });
   const message = String(messageTemplate)
-    .replaceAll("{contact}", contact)
+    .replaceAll("{contact}", String(contact || "").trim())
     .replaceAll("{company}", company);
 
   try {
