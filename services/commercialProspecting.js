@@ -203,8 +203,8 @@ async function processCommercialTask(payload) {
   const statusResponse = await sheets.spreadsheets.values.get({
     spreadsheetId, range: range + "!I" + rowNumber + ":I" + rowNumber
   });
-  const currentStatus = statusResponse.data.values?.[0]?.[0] || "";
-  if (["ENVIADO", "ENVIANDO"].includes(currentStatus)) {
+  const currentStatus = String(statusResponse.data.values?.[0]?.[0] || "").trim().toUpperCase();
+  if (["ENVIADO", "ENVIANDO"].includes(currentStatus) || currentStatus.startsWith("ERROR: VERIFICAR")) {
     return { skipped: true, reason: "already_processed", rowNumber };
   }
 
