@@ -61,7 +61,7 @@ function validateSheetData(data) {
   if (!data || typeof data.spreadsheetId !== "string" || !data.spreadsheetId.trim()) {
     const error = new Error("Falta spreadsheetId."); error.statusCode = 400; error.publicMessage = error.message; throw error;
   }
-  if (!/^[a-zA-Z0-9_-]+$/.test(String(data.sheetName || ""))) {
+  if (!/^[a-zA-Z0-9 _-]+$/.test(String(data.sheetName || "").trim())) {
     const error = new Error("Nombre de pestaña inválido."); error.statusCode = 400; error.publicMessage = error.message; throw error;
   }
   if (!Array.isArray(data.contacts) || data.contacts.length === 0) {
