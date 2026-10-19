@@ -25,9 +25,8 @@ Estados principales: `EN COLA`, `ENVIANDO`, `ENVIADO`, `ERROR` y `PENDIENTE: FUE
 
 Configurar con valores seguros en Cloud Run; no guardar secretos en Git:
 
-- `COMMERCIAL_API_KEY`: secreto compartido con Apps Script para iniciar lotes.
 - `COMMERCIAL_TASK_KEY`: secreto interno que autentica las solicitudes de Cloud Tasks al endpoint de envío.
-- `COMMERCIAL_EVOLUTION_INSTANCE=comercial`
+- `COMMERCIAL_EVOLUTION_INSTANCE=Erick2`
 - `COMMERCIAL_QUEUE=commercial-sender`
 - `EVOLUTION_URL`
 - `EVOLUTION_API_KEY`
