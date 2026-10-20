@@ -23,7 +23,6 @@ const INSTANCE = process.env.COMMERCIAL_EVOLUTION_INSTANCE || "Erick2";
 const TASK_KEY = process.env.COMMERCIAL_TASK_KEY;
 const MIN_DELAY_MS = 55 * 1000;
 const MAX_DELAY_MS = 65 * 1000;
-const MAX_BATCH_SIZE = 35;
 const MIN_TYPING_DELAY_MS = 9000;
 const MAX_TYPING_DELAY_MS = 15000;
 const TZ = "America/Monterrey";
@@ -66,9 +65,6 @@ function validateSheetData(data) {
   }
   if (!Array.isArray(data.contacts) || data.contacts.length === 0) {
     const error = new Error("Selecciona al menos un contacto."); error.statusCode = 400; error.publicMessage = error.message; throw error;
-  }
-  if (data.contacts.length > MAX_BATCH_SIZE) {
-    const error = new Error("El lote máximo es de 35 contactos."); error.statusCode = 400; error.publicMessage = error.message; throw error;
   }
   const seenRows = new Set();
   for (const c of data.contacts) {
