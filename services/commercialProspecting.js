@@ -56,30 +56,79 @@ function validateConfig() {
   if (missing.length) throw new Error("Faltan variables de entorno: " + [...new Set(missing)].join(", "));
 }
 
+function httpError(message, statusCode = 400) {
+  const error = new Error(message);
+  error.statusCode = statusCode;
+  error.publicMessage = message;
+  return error;
+}
+
 function validateSheetData(data) {
   if (!data || typeof data.spreadsheetId !== "string" || !data.spreadsheetId.trim()) {
-    const error = new Error("Falta spreadsheetId."); error.statusCode = 400; error.publicMessage = error.message; throw error;
+    throw httpError("Falta spreadsheetId.");
   }
   if (!/^[a-zA-Z0-9 _-]+$/.test(String(data.sheetName || "").trim())) {
-    const error = new Error("Nombre de pestaña inválido."); error.statusCode = 400; error.publicMessage = error.message; throw error;
+    throw httpError("Nombre de pestaña inválido.");
   }
   if (!Array.isArray(data.contacts) || data.contacts.length === 0) {
-    const error = new Error("Selecciona al menos un contacto."); error.statusCode = 400; error.publicMessage = error.message; throw error;
+    throw httpError("Selecciona al menos un contacto.");
   }
+
   const seenRows = new Set();
   for (const c of data.contacts) {
     const rowNumber = Number(c.rowNumber);
-    if (!Number.isInteger(rowNumber) || rowNumber < 2 || !String(c.company || "").trim() || !String(c.phone || "").trim()) {
-      const error = new Error("Cada contacto requiere fila, empresa y teléfono. El nombre del contacto es opcional."); error.statusCode = 400; error.publicMessage = error.message; throw error;
+    const messageType = Number(c.messageType);
+
+    if (!Number.isInteger(rowNumber) || rowNumber < 2 ||
+        !String(c.company || "").trim() || !String(c.phone || "").trim()) {
+      throw httpError("Cada contacto requiere fila, empresa y teléfono. El nombre del contacto es opcional.");
+    }
+    if (![1, 2].includes(messageType)) {
+      throw httpError("La fila " + rowNumber + " tiene un tipo de mensaje inválido. Solo se permite 1 o 2.");
     }
     if (seenRows.has(rowNumber)) {
-      const error = new Error("La fila " + rowNumber + " aparece más de una vez."); error.statusCode = 400; error.publicMessage = error.message; throw error;
+      throw httpError("La fila " + rowNumber + " aparece más de una vez.");
     }
     seenRows.add(rowNumber);
   }
 }
 
 function escapedSheet(sheetName) { return "'" + sheetName.replace(/'/g, "''") + "'"; }
+
+/**
+ * Interpreta el historial almacenado en I.
+ * Formatos combinados: "ENVIADO - MENSAJES 1, 2"
+ * También reconoce el formato individual: "ENVIADO - MENSAJE 1".
+ */
+function getSentTypes(status) {
+  const value = String(status || "").toUpperCase();
+  const sent = [];
+  if (/ENVIADO\s*-\s*MENSAJE(?:S)?\s*1(?:\s*[,Y]\s*2)?/.test(value)) sent.push(1);
+  if (/ENVIADO\s*-\s*MENSAJE(?:S)?\s*(?:1\s*[,Y]\s*)?2/.test(value)) sent.push(2);
+  return sent;
+}
+
+function hasLegacyUnidentifiedSentStatus(status) {
+  const value = String(status || "").trim().toUpperCase();
+  return value === "ENVIADO" || value === "ENVIADO - MENSAJE";
+}
+
+function hasActiveTask(status) {
+  const value = String(status || "").toUpperCase();
+  return value.includes("EN COLA") || value.includes("ENVIANDO");
+}
+
+function historySuffix(sentTypes) {
+  const unique = [...new Set(sentTypes)].sort();
+  if (unique.length === 0) return "";
+  if (unique.length === 1) return "ENVIADO - MENSAJE " + unique[0];
+  return "ENVIADO - MENSAJES " + unique.join(", ");
+}
+
+function composeStatus(currentStatus, activeLabel, sentTypes) {
+  const parts = [activeLabel, historySuffix(sentTypes)].filter(Boolean);
+  return parts.join(" | ");
+}
 
 async function ensureTrackingColumns(spreadsheetId, sheetName) {
   const sheets = getSheetsClient();
@@ -102,17 +151,32 @@ async function ensureTrackingColumns(spreadsheetId, sheetName) {
 async function updateTracking(spreadsheetId, sheetName, rowNumber, values) {
   const sheets = getSheetsClient();
   const range = escapedSheet(sheetName);
+  const data = [
+    { range: range + "!I" + rowNumber, values: [[values.status ?? ""]] },
+    { range: range + "!J" + rowNumber, values: [[values.error ?? ""]] }
+  ];
+
+  // Solo modificar H cuando se proporciona explícitamente una fecha.
+  if (Object.prototype.hasOwnProperty.call(values, "date")) {
+    data.push({ range: range + "!H" + rowNumber, values: [[values.date]] });
+  }
+
   await sheets.spreadsheets.values.batchUpdate({
     spreadsheetId,
-    requestBody: {
-      valueInputOption: "RAW",
-      data: [
-        { range: range + "!H" + rowNumber, values: [[values.date || ""]] },
-        { range: range + "!I" + rowNumber, values: [[values.status || ""]] },
-        { range: range + "!J" + rowNumber, values: [[values.error || ""]] }
-      ]
-    }
+    requestBody: { valueInputOption: "RAW", data }
   });
+}
+
+async function readRowTracking(sheets, spreadsheetId, sheetName, rowNumber) {
+  const response = await sheets.spreadsheets.values.get({
+    spreadsheetId,
+    range: escapedSheet(sheetName) + "!H" + rowNumber + ":I" + rowNumber
+  });
+  const values = response.data.values?.[0] || [];
+  return {
+    firstSentAt: String(values[0] || ""),
+    status: String(values[1] || "").trim()
+  };
 }
 
 async function enqueueCommercialProspects(data) {
@@ -123,27 +187,37 @@ async function enqueueCommercialProspects(data) {
   const minute = localMinute();
   const remainingMinutes = (20 - hour) * 60 - minute;
   if (!isWithinSendingHours() || remainingMinutes < data.contacts.length * 5) {
-    const error = new Error("Inicia el lote entre las 08:00 y las 20:00 de Monterrey y con tiempo suficiente para terminarlo.");
-    error.statusCode = 400; error.publicMessage = error.message; throw error;
+    throw httpError("Inicia el lote entre las 08:00 y las 20:00 de Monterrey y con tiempo suficiente para terminarlo.");
   }
 
   await ensureTrackingColumns(data.spreadsheetId, data.sheetName);
   const sheets = getSheetsClient();
   const client = await getQueueClient();
-  const queuePath = `projects/${PROJECT_ID}/locations/${QUEUE_LOCATION}/queues/${QUEUE}`;
-  // Validar todas las filas antes de crear la primera tarea para evitar lotes parciales por estados existentes.
+  const queuePath = \`projects/\${PROJECT_ID}/locations/\${QUEUE_LOCATION}/queues/\${QUEUE}\`;
+
+  // Validar el lote completo antes de crear tareas.
+  const trackingByRow = new Map();
   for (const contact of data.contacts) {
     const rowNumber = Number(contact.rowNumber);
-    const current = await sheets.spreadsheets.values.get({
-      spreadsheetId: data.spreadsheetId,
-      range: escapedSheet(data.sheetName) + "!I" + rowNumber + ":I" + rowNumber
-    });
-    const status = String(current.data.values?.[0]?.[0] || "").trim().toUpperCase();
-    if (["EN COLA", "ENVIANDO", "ENVIADO"].includes(status) || status.startsWith("ERROR: VERIFICAR")) {
-      throw Object.assign(new Error("La fila " + rowNumber + " ya está procesada o en cola."), {
-        statusCode: 409, publicMessage: "La fila " + rowNumber + " ya está procesada o en cola."
-      });
+    const tracking = await readRowTracking(sheets, data.spreadsheetId, data.sheetName, rowNumber);
+    const status = tracking.status.toUpperCase();
+    const messageType = Number(contact.messageType);
+    const sentTypes = getSentTypes(status);
+
+    if (hasActiveTask(status)) {
+      throw httpError("La fila " + rowNumber + " ya tiene un mensaje pendiente o en proceso.", 409);
     }
+    if (status.includes("ERROR: VERIFICAR")) {
+      throw httpError("La fila " + rowNumber + " requiere verificar el resultado del envío anterior.", 409);
+    }
+    if (hasLegacyUnidentifiedSentStatus(status)) {
+      throw httpError("La fila " + rowNumber + " tiene un envío anterior sin tipo identificado. Revisa esa fila antes de continuar.", 409);
+    }
+    if (sentTypes.includes(messageType)) {
+      throw httpError("El mensaje " + messageType + " ya fue enviado en la fila " + rowNumber + ".", 409);
+    }
+
+    trackingByRow.set(rowNumber, { ...tracking, sentTypes });
   }
 
   const tasks = [];
@@ -151,19 +225,35 @@ async function enqueueCommercialProspects(data) {
 
   for (const contact of data.contacts) {
     const rowNumber = Number(contact.rowNumber);
+    const messageType = Number(contact.messageType);
+    const tracking = trackingByRow.get(rowNumber);
+
     if (tasks.length > 0) cumulativeDelayMs += randomDelayMs();
     const scheduledAt = new Date(Date.now() + cumulativeDelayMs);
+    const queuedStatus = composeStatus(
+      tracking.status,
+      "EN COLA - MENSAJE " + messageType,
+      tracking.sentTypes
+    );
+
+    // Marcar la fila antes de crear la tarea para reducir la ventana de duplicación.
+    await updateTracking(data.spreadsheetId, data.sheetName, rowNumber, {
+      status: queuedStatus,
+      error: ""
+    });
+
     const payload = {
       taskId: crypto.randomUUID(),
       spreadsheetId: data.spreadsheetId,
       sheetName: data.sheetName,
       rowNumber,
       company: String(contact.company).trim(),
-      contact: String(contact.contact).trim(),
+      contact: String(contact.contact || "").trim(),
       phone: String(contact.phone).trim(),
-      instance: INSTANCE,
-      messageTemplate: String(contact.contact || "").trim() ? "Hola! buenos días disculpa es {contact} de {company}? le escribe Erick Padilla de Coparmex NL" : "Hola! buenos días disculpa es {company}? le escribe Erick Padilla de Coparmex NL"
+      messageType,
+      instance: INSTANCE
     };
+
     const task = {
       httpRequest: {
         httpMethod: "POST",
@@ -177,69 +267,137 @@ async function enqueueCommercialProspects(data) {
       },
       scheduleTime: scheduledAt.toISOString()
     };
-    await client.request({
-      url: `https://cloudtasks.googleapis.com/v2/${queuePath}/tasks`,
-      method: "POST",
-      data: { task }
-    });
-    await updateTracking(data.spreadsheetId, data.sheetName, rowNumber, { status: "EN COLA", error: "" });
-    tasks.push({ rowNumber, scheduledAt: scheduledAt.toISOString() });
+
+    try {
+      await client.request({
+        url: \`https://cloudtasks.googleapis.com/v2/\${queuePath}/tasks\`,
+        method: "POST",
+        data: { task }
+      });
+    } catch (error) {
+      await updateTracking(data.spreadsheetId, data.sheetName, rowNumber, {
+        status: composeStatus(tracking.status, "ERROR - MENSAJE " + messageType, tracking.sentTypes),
+        error: String(error.message || "No se pudo crear la tarea.").slice(0, 450)
+      });
+      throw error;
+    }
+
+    tasks.push({ rowNumber, messageType, scheduledAt: scheduledAt.toISOString() });
   }
 
-  return { queued: tasks.length, instance: INSTANCE, queue: QUEUE, note: "Mensajes puestos en cola de forma gradual." };
+  return {
+    queued: tasks.length,
+    instance: INSTANCE,
+    queue: QUEUE,
+    message1: tasks.filter(task => task.messageType === 1).length,
+    message2: tasks.filter(task => task.messageType === 2).length,
+    note: "Mensajes puestos en cola de forma gradual."
+  };
+}
+
+function buildMessage(messageType, contact, company) {
+  const name = String(contact || "").trim();
+  const business = String(company || "").trim();
+
+  if (messageType === 1) {
+    return name
+      ? "Hola! buenos días disculpa es {contact} de {company}? le escribe Erick Padilla de Coparmex NL"
+      : "Hola! buenos días disculpa es {company}? le escribe Erick Padilla de Coparmex NL";
+  }
+
+  if (messageType === 2) {
+    return name
+      ? "Hola buenos días {contact}! escribo para dar seguimiento, con gusto puedo dar más detalles y resolver dudas, saludos!"
+      : "Hola buenos días! escribo para dar seguimiento, con gusto puedo dar más detalles y resolver dudas, saludos!";
+  }
+
+  throw new Error("Tipo de mensaje no permitido.");
 }
 
 async function processCommercialTask(payload) {
-  const { spreadsheetId, sheetName, rowNumber, company, contact, phone, instance, messageTemplate, taskId } = payload;
-  if (!spreadsheetId || !sheetName || !rowNumber || !company || !phone || !instance || !taskId) {
-    throw new Error("Payload de tarea comercial incompleto.");
+  const {
+    spreadsheetId, sheetName, rowNumber, company, contact, phone,
+    instance, messageType, taskId
+  } = payload;
+
+  const type = Number(messageType);
+  if (!spreadsheetId || !sheetName || !rowNumber || !company || !phone ||
+      !instance || !taskId || ![1, 2].includes(type)) {
+    throw new Error("Payload de tarea comercial incompleto o inválido.");
   }
+
   const sheets = getSheetsClient();
-  const range = escapedSheet(sheetName);
-  const statusResponse = await sheets.spreadsheets.values.get({
-    spreadsheetId, range: range + "!I" + rowNumber + ":I" + rowNumber
-  });
-  const currentStatus = String(statusResponse.data.values?.[0]?.[0] || "").trim().toUpperCase();
-  if (["ENVIADO", "ENVIANDO"].includes(currentStatus) || currentStatus.startsWith("ERROR: VERIFICAR")) {
-    return { skipped: true, reason: "already_processed", rowNumber };
+  const tracking = await readRowTracking(sheets, spreadsheetId, sheetName, rowNumber);
+  const currentStatus = tracking.status;
+  const sentTypes = getSentTypes(currentStatus);
+
+  if (sentTypes.includes(type)) {
+    return { skipped: true, reason: "message_type_already_sent", rowNumber, messageType: type };
+  }
+
+  if (currentStatus.toUpperCase().includes("ENVIANDO")) {
+    return { skipped: true, reason: "row_already_processing", rowNumber };
+  }
+
+  // Solo procesar tareas que sigan registradas como EN COLA para ese tipo.
+  if (!currentStatus.toUpperCase().includes("EN COLA - MENSAJE " + type)) {
+    return { skipped: true, reason: "task_no_longer_queued", rowNumber, messageType: type };
   }
 
   if (!isWithinSendingHours()) {
     await updateTracking(spreadsheetId, sheetName, rowNumber, {
-      status: "PENDIENTE: FUERA DE HORARIO", error: "Reprogramar este envío manualmente."
+      status: composeStatus(currentStatus, "PENDIENTE - MENSAJE " + type, sentTypes),
+      error: "Fuera del horario permitido. Vuelve a seleccionar este tipo de mensaje para reencolarlo."
     });
     return { skipped: true, reason: "outside_sending_hours", rowNumber };
   }
 
-  await updateTracking(spreadsheetId, sheetName, rowNumber, { status: "ENVIANDO", error: "" });
-  const message = String(messageTemplate)
+  await updateTracking(spreadsheetId, sheetName, rowNumber, {
+    status: composeStatus(currentStatus, "ENVIANDO - MENSAJE " + type, sentTypes),
+    error: ""
+  });
+
+  const messageTemplate = buildMessage(type, contact, company);
+  const message = messageTemplate
     .replaceAll("{contact}", String(contact || "").trim())
-    .replaceAll("{company}", company);
+    .replaceAll("{company}", String(company || "").trim());
 
   try {
     const result = await sendMessage(instance, phone, message, {
       presence: "composing",
       delayMs: randomTypingDelayMs()
     });
+
     if (!result?.sent) {
       await updateTracking(spreadsheetId, sheetName, rowNumber, {
-        status: "ERROR", error: result?.reason || "Evolution no confirmó el envío."
+        status: composeStatus(currentStatus, "ERROR - MENSAJE " + type, sentTypes),
+        error: String(result?.reason || "Evolution no confirmó el envío.").slice(0, 450)
       });
-      return { sent: false, rowNumber, reason: result?.reason || "send_failed" };
+      return { sent: false, rowNumber, messageType: type, reason: result?.reason || "send_failed" };
     }
+
     const sentAt = new Date().toISOString();
-    await updateTracking(spreadsheetId, sheetName, rowNumber, { date: sentAt, status: "ENVIADO", error: "" });
-    return { sent: true, rowNumber, sentAt };
+    const nextSentTypes = [...sentTypes, type];
+    const updatedStatus = "ENVIADO - " +
+      (nextSentTypes.length > 1 ? "MENSAJES " : "MENSAJE ") +
+      [...new Set(nextSentTypes)].sort().join(", ");
+
+    const update = { status: updatedStatus, error: "" };
+    if (!tracking.firstSentAt) update.date = sentAt;
+
+    await updateTracking(spreadsheetId, sheetName, rowNumber, update);
+    return { sent: true, rowNumber, messageType: type, sentAt };
   } catch (error) {
-    // No lanzar el error después de intentar enviar: un reintento automático podría duplicar el WhatsApp.
+    // Evitar que un reintento automático duplique un mensaje cuyo resultado sea incierto.
     try {
       await updateTracking(spreadsheetId, sheetName, rowNumber, {
-        status: "ERROR: VERIFICAR", error: String(error.message || "Resultado de envío incierto; verificar antes de reintentar.").slice(0, 450)
+        status: composeStatus(currentStatus, "ERROR: VERIFICAR - MENSAJE " + type, sentTypes),
+        error: String(error.message || "Resultado de envío incierto; verificar antes de reintentar.").slice(0, 450)
       });
     } catch (trackingError) {
       console.error("No se pudo actualizar el seguimiento; la fila puede permanecer ENVIANDO:", trackingError.message);
     }
-    return { sent: false, rowNumber, reason: "send_result_needs_manual_verification" };
+    return { sent: false, rowNumber, messageType: type, reason: "send_result_needs_manual_verification" };
   }
 }
 
