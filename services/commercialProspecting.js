@@ -20,6 +20,22 @@ const PROJECT_ID = process.env.GOOGLE_CLOUD_PROJECT || process.env.GCP_PROJECT;
 const CLOUD_RUN_URL = process.env.CLOUD_RUN_URL;
 const SERVICE_ACCOUNT_EMAIL = process.env.GOOGLE_CLIENT_EMAIL;
 const INSTANCE = process.env.COMMERCIAL_EVOLUTION_INSTANCE || "Erick2";
+const CRINOLINAS_INSTANCE = process.env.COMMERCIAL_EVOLUTION_INSTANCE_CRINOLINAS || "Erick3";
+
+const PROJECTS = {
+  start: {
+    key: "start",
+    instance: INSTANCE,
+    spreadsheetId: null,
+    sheets: null
+  },
+  crinolinas_cojines: {
+    key: "crinolinas_cojines",
+    instance: CRINOLINAS_INSTANCE,
+    spreadsheetId: "1hiUU6UQIzxrKJtus4vhzjoYQm4hhlRhnMHLl1Dy8ScU",
+    sheets: ["prospeccion cr", "prospeccion co"]
+  }
+};
 const TASK_KEY = process.env.COMMERCIAL_TASK_KEY;
 const MIN_DELAY_MS = 55 * 1000;
 const MAX_DELAY_MS = 65 * 1000;
@@ -63,6 +79,23 @@ function httpError(message, statusCode = 400) {
   return error;
 }
 
+function resolveProject(projectKey, spreadsheetId, sheetName) {
+  // Las solicitudes antiguas de START no enviaban projectKey.
+  const key = String(projectKey || "start").trim();
+  const project = PROJECTS[key];
+
+  if (!project) {
+    throw httpError("Proyecto no reconocido: " + key + ".", 403);
+  }
+  if (project.spreadsheetId && project.spreadsheetId !== spreadsheetId) {
+    throw httpError("El documento de Google Sheets no corresponde al proyecto indicado.", 403);
+  }
+  if (project.sheets && !project.sheets.includes(sheetName)) {
+    throw httpError("La pestaña no está autorizada para el proyecto " + key + ".", 403);
+  }
+  return project;
+}
+
 function validateSheetData(data) {
   if (!data || typeof data.spreadsheetId !== "string" || !data.spreadsheetId.trim()) {
     throw httpError("Falta spreadsheetId.");
@@ -70,6 +103,7 @@ function validateSheetData(data) {
   if (!/^[a-zA-Z0-9 _-]+$/.test(String(data.sheetName || "").trim())) {
     throw httpError("Nombre de pestaña inválido.");
   }
+  const project = resolveProject(data.projectKey, data.spreadsheetId, String(data.sheetName).trim());
   if (!Array.isArray(data.contacts) || data.contacts.length === 0) {
     throw httpError("Selecciona al menos un contacto.");
   }
@@ -91,6 +125,7 @@ function validateSheetData(data) {
     }
     seenRows.add(rowNumber);
   }
+  return project;
 }
 
 function escapedSheet(sheetName) { return "'" + sheetName.replace(/'/g, "''") + "'"; }
@@ -181,7 +216,7 @@ async function readRowTracking(sheets, spreadsheetId, sheetName, rowNumber) {
 
 async function enqueueCommercialProspects(data) {
   validateConfig();
-  validateSheetData(data);
+  const project = validateSheetData(data);
 
   const hour = localHour();
   const minute = localMinute();
@@ -251,7 +286,8 @@ async function enqueueCommercialProspects(data) {
       contact: String(contact.contact || "").trim(),
       phone: String(contact.phone).trim(),
       messageType,
-      instance: INSTANCE
+      projectKey: project.key,
+      instance: project.instance
     };
 
     const task = {
@@ -287,7 +323,8 @@ async function enqueueCommercialProspects(data) {
 
   return {
     queued: tasks.length,
-    instance: INSTANCE,
+    instance: project.instance,
+    projectKey: project.key,
     queue: QUEUE,
     message1: tasks.filter(task => task.messageType === 1).length,
     message2: tasks.filter(task => task.messageType === 2).length,
@@ -317,13 +354,18 @@ function buildMessage(messageType, contact, company) {
 async function processCommercialTask(payload) {
   const {
     spreadsheetId, sheetName, rowNumber, company, contact, phone,
-    instance, messageType, taskId
+    instance, messageType, taskId, projectKey
   } = payload;
 
   const type = Number(messageType);
   if (!spreadsheetId || !sheetName || !rowNumber || !company || !phone ||
       !instance || !taskId || ![1, 2].includes(type)) {
     throw new Error("Payload de tarea comercial incompleto o inválido.");
+  }
+
+  const project = resolveProject(projectKey, spreadsheetId, sheetName);
+  if (instance !== project.instance) {
+    throw new Error("La instancia de Evolution no corresponde al proyecto de la tarea.");
   }
 
   const sheets = getSheetsClient();
