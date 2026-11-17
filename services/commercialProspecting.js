@@ -332,9 +332,22 @@ async function enqueueCommercialProspects(data) {
   };
 }
 
-function buildMessage(messageType, contact, company) {
+function buildMessage(messageType, contact, company, projectKey = "start") {
   const name = String(contact || "").trim();
-  const business = String(company || "").trim();
+
+  if (projectKey === "crinolinas_cojines") {
+    if (messageType === 1) {
+      return name
+        ? "¡Buenos días! Disculpe, ¿es {contact} de {company}? Le escribe Erick Padilla de ARIE Confecciones."
+        : "¡Buenos días! Disculpe, ¿es {company}? Le escribe Erick Padilla de ARIE Confecciones.";
+    }
+
+    if (messageType === 2) {
+      return "¡Hola! Buenos días, ¿cómo está? Disculpe, quería dar seguimiento. ¿Cómo le pareció nuestra información?";
+    }
+
+    throw new Error("Tipo de mensaje no permitido.");
+  }
 
   if (messageType === 1) {
     return name
@@ -399,7 +412,7 @@ async function processCommercialTask(payload) {
     error: ""
   });
 
-  const messageTemplate = buildMessage(type, contact, company);
+  const messageTemplate = buildMessage(type, contact, company, project.key);
   const message = messageTemplate
     .replaceAll("{contact}", String(contact || "").trim())
     .replaceAll("{company}", String(company || "").trim());
