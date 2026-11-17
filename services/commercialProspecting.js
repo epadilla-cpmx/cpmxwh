@@ -193,7 +193,7 @@ async function enqueueCommercialProspects(data) {
   await ensureTrackingColumns(data.spreadsheetId, data.sheetName);
   const sheets = getSheetsClient();
   const client = await getQueueClient();
-  const queuePath = \`projects/\${PROJECT_ID}/locations/\${QUEUE_LOCATION}/queues/\${QUEUE}\`;
+  const queuePath = `projects/${PROJECT_ID}/locations/${QUEUE_LOCATION}/queues/${QUEUE}`;
 
   // Validar el lote completo antes de crear tareas.
   const trackingByRow = new Map();
@@ -270,7 +270,7 @@ async function enqueueCommercialProspects(data) {
 
     try {
       await client.request({
-        url: \`https://cloudtasks.googleapis.com/v2/\${queuePath}/tasks\`,
+        url: `https://cloudtasks.googleapis.com/v2/${queuePath}/tasks`,
         method: "POST",
         data: { task }
       });
